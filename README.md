@@ -2,7 +2,6 @@
 
 ## Compiling the Proofs
 ```
-./configure
 make
 ```
 
