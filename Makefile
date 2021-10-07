@@ -15,8 +15,7 @@ Makefile.coq: _CoqProject Makefile
 
 _CoqProject:
 	@echo -R src MSTPE > _CoqProject
-	@echo src/**.v 		 >> _CoqProject
-	@echo src/*/*.v 		 >> _CoqProject
+	@echo src/*/*.v 	>> _CoqProject
 
 Makefile: ;
 
