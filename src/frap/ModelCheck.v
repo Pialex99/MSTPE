@@ -26,7 +26,8 @@
   POSSIBILITY OF SUCH DAMAGE.
 *)
 
-Require Import Invariant Relations Sets Classical.
+Require Import Classical.
+From Frap Require Import Invariant Relations Sets.
 
 Set Implicit Arguments.
 

@@ -26,6 +26,6 @@
   POSSIBILITY OF SUCH DAMAGE.
 *)
 
-Require Export FrapWithoutSets.
+Require Export Frap.FrapWithoutSets.
 
 Module Export SN := SetNotations(FrapWithoutSets).

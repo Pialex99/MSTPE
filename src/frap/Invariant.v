@@ -26,7 +26,7 @@
   POSSIBILITY OF SUCH DAMAGE.
 *)
 
-Require Import Relations.
+From Frap Require Import Relations.
 
 Set Implicit Arguments.
 

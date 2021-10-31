@@ -26,8 +26,9 @@
   POSSIBILITY OF SUCH DAMAGE.
 *)
 
-Require Import Eqdep String NArith Arith Lia Program Sets Relations Map Var Invariant Bool ModelCheck.
-Export Ascii String Arith Sets Relations Map Var Invariant Bool ModelCheck.
+Require Import Eqdep String NArith Arith Lia Program Bool.
+From Frap Require Import Sets Relations Map Invariant ModelCheck.
+Export Ascii String Arith Sets Relations Map Invariant Bool ModelCheck.
 Require Import List.
 Export List ListNotations.
 Open Scope string_scope.

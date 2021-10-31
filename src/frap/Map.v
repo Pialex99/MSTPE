@@ -26,7 +26,8 @@
   POSSIBILITY OF SUCH DAMAGE.
 *)
 
-Require Import Classical Sets ClassicalEpsilon FunctionalExtensionality.
+Require Import Classical ClassicalEpsilon FunctionalExtensionality.
+From Frap Require Import Sets.
 
 Set Implicit Arguments.
 
