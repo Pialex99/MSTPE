@@ -1,17 +1,5 @@
 From Utils Require Export Int.
-
-Inductive literal : Set := 
-| IntLit (n: int) 
-| BoolLit (b: bool)
-| UnitLit.
-
-Definition lit_eqb l1 l2 :=
-  match l1, l2 with
-  | IntLit n1, IntLit n2 => BinIntDef.Z.eqb n1 n2
-  | BoolLit b1, BoolLit b2 => Bool.eqb b1 b2
-  | UnitLit, UnitLit => true
-  | _, _ => false
-  end.
+From Common Require Export Literal Primitive.
 
 (* Inductive type : Set := 
 | Int | Bool | Unit 
@@ -20,16 +8,6 @@ Definition lit_eqb l1 l2 :=
 | Sum (ltpe rtpe : type). *)
 
 (* Record arg : Set := {name: nat;tpe: type}. *)
-
-(* Unary and binary primitives are pure *)
-Inductive binary_primitives : Set := 
-| Add | Sub | Mul | Div | Mod 
-| Lt | Le | Eq
-| Or | And
-| Tup.
-
-Inductive unary_primitives : Set := 
-| Neg | Not | Fst | Snd | Left | Right.
 
 Inductive term : Set := 
 | Var (n: nat)

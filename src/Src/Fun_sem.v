@@ -1,9 +1,6 @@
-From Frap Require Import Frap.
-From Utils Require Import Stream Int Env Tactics.
+Require Import Arith Bool List.
+From Utils Require Import Stream Int Env Tactics IO.
 From Src Require Import Tree.
-
-
-Open Scope list_scope.
 
 Inductive value :=
 | Lit (l: literal)
@@ -11,6 +8,9 @@ Inductive value :=
 | Left (v: value)
 | Right (v: value)
 | Fun (f: function) (e: env value).
+
+#[global]
+Hint Constructors value : eval.
 
 Fixpoint value_eqb (v1 v2 : value) :=
   match v1, v2 with 
@@ -28,13 +28,17 @@ Inductive result :=
 (* | Rhalt (n: int) (* End of program with Halt *) *)
 | Rtimeout. (* Clock reached 0 *)
 
+Definition is_timeout r := 
+  match r with
+  | Rtimeout => True
+  | _ => False
+  end.
+
 Definition is_val r := 
   match r with 
   | Rval _ => True 
   | _ => False 
   end.
-
-(* Definition is_val_dec r : { True } + { False }. *)
 
 Definition is_int_val r := 
   match r with 
@@ -62,7 +66,7 @@ Definition is_fun_val r :=
   end.
 
 #[global]
-Hint Unfold is_val is_int_val is_bool_val is_either_val is_fun_val : eval.
+Hint Unfold is_val is_int_val is_bool_val is_either_val is_fun_val is_timeout : eval.
 
 (* Record state := mk_state {env: env value; input: list int; output: list int}.
 
@@ -78,7 +82,6 @@ Definition outputs (s: state) (o: int) :=
 Definition bind (s: state) (x: nat) (v: value) := 
   mk_state (Env.add (env s) x v) (input s) (output s). *)
 
-Record IO := {input : list int; output : list int}.
 
 Open Scope Z_scope.
 
@@ -104,8 +107,9 @@ Definition compute_unary_op op v :=
   | Not, Lit (BoolLit b) => Rval (Lit (BoolLit (negb b)))
   | Fst, Tuple v1 _ => Rval v1
   | Snd, Tuple _ v2 => Rval v2
-  | Tree.Left, v => Rval (Left v)
-  | Tree.Right, v => Rval (Right v)
+  | Primitive.Left, v => Rval (Left v)
+  | Primitive.Right, v => Rval (Right v)
+  | Id, v => Rval v
   | _, _ => Rerr
   end.
 
@@ -125,7 +129,7 @@ Inductive eval : env value -> term -> IO -> nat -> result -> IO -> Prop :=
     eval (Env.add env n v) t' io' f' r io'' ->
       eval env (Let n t t') io (f + f' + 1) r io''
 | eval_let_err : forall env io n t t' f r io',
-    ~ (is_val r) -> 
+    ~ (is_val r) ->
     eval env t io f r io' ->
       eval env (Let n t t') io (f + 1) r io'
 | eval_letrec : forall env io fname farg fbody f t io' r,
@@ -141,11 +145,11 @@ Inductive eval : env value -> term -> IO -> nat -> result -> IO -> Prop :=
     ~ (is_val r) ->
     eval env e1 io f r io' ->
       eval env (App e1 e2) io (f + 1) r io'
-| evel_app_err' : forall env e1 e2 f io io' r,
-    ~ (is_fun_val r) ->
+| eval_app_err' : forall env e1 e2 f io io' r,
+    is_val r -> ~ (is_fun_val r) ->
     eval env e1 io f r io' ->
       eval env (App e1 e2) io (f + 1) Rerr io'
-| evel_app_err'' : forall env e1 e2 f1 f2 fname farg fbody fenv io0 io1 io2 r,
+| eval_app_err'' : forall env e1 e2 f1 f2 fname farg fbody fenv io0 io1 io2 r,
     let f := (Fun (Func fname farg fbody) fenv) in
     ~ (is_val r) ->
     eval env e1 io0 f1 (Rval f) io1 ->
@@ -163,7 +167,7 @@ Inductive eval : env value -> term -> IO -> nat -> result -> IO -> Prop :=
     eval env t io f r io' ->
     eval env (Out t) io (f + 1) r io' 
 | eval_out_err' : forall env t f io r io',
-    ~ (is_int_val r) ->
+    is_val r -> ~ (is_int_val r) -> 
     eval env t io f r io' ->
       eval env (Out t) io (f + 1) Rerr io'
 | eval_ite_true : forall env cond thent elset f f' io io' r io'',
@@ -179,7 +183,7 @@ Inductive eval : env value -> term -> IO -> nat -> result -> IO -> Prop :=
     eval env cond io f r io' ->
       eval env (Ite cond thent elset) io (f + 1) r io'
 | eval_ite_err' : forall env cond thent elset f io r io',
-    ~ (is_bool_val r) ->
+    is_val r -> ~ (is_bool_val r) ->
     eval env cond io f r io' ->
       eval env (Ite cond thent elset) io (f + 1) Rerr io'
 | eval_match_left : forall env scrut n lt rcase v f io io' f' r io'',
@@ -195,7 +199,7 @@ Inductive eval : env value -> term -> IO -> nat -> result -> IO -> Prop :=
     eval env scrut io f r io' ->
       eval env (Match scrut lcase rcase) io (f + 1) r io' 
 | eval_match_err' : forall env scrut lcase rcase f r io io',
-    ~ (is_either_val r) ->
+    is_val r -> ~ (is_either_val r) ->
     eval env scrut io f r io' ->
       eval env (Match scrut lcase rcase) io (f + 1) Rerr io' 
 | eval_binop : forall env op t1 t2 v1 v2 f f' io io' io'',
@@ -206,8 +210,8 @@ Inductive eval : env value -> term -> IO -> nat -> result -> IO -> Prop :=
     ~ (is_val r1) -> 
     eval env t1 io f r1 io' ->
       eval env (BinaryOp op t1 t2) io (f + 1) r1 io' 
-| eval_binop_err' : forall env op t1 t2 r1 r2 f f' io io' io'',
-    eval env t1 io f r1 io' ->
+| eval_binop_err' : forall env op t1 t2 v1 r2 f f' io io' io'',
+    eval env t1 io f (Rval v1) io' ->
     ~ (is_val r2) -> 
     eval env t2 io' f' r2 io'' ->
       eval env (BinaryOp op t1 t2) io (f + f' + 1) r2 io''
@@ -219,37 +223,17 @@ Inductive eval : env value -> term -> IO -> nat -> result -> IO -> Prop :=
     eval env t io f r io' ->
       eval env (UnaryOp op t) io (f + 1) r io'
 | eval_timeout : forall env t io,
-    eval env t io 0 Rtimeout io.
+    eval env t io 0 Rtimeout io
+| eval_extra_fuel : forall env t f io io' r,
+    ~ (is_timeout r) ->
+    eval env t io f r io' ->
+      eval env t io (f + 1) r io'.
 
 #[global]
 Hint Constructors eval : eval.
 
 Definition diverge t := forall env io f io',
   eval env t io f Rtimeout io'.
-(* 
-Lemma eval_timeout_monoton: forall t env io f io',
-  eval env t io f Rtimeout io' -> forall f', f' <= f -> 
-    exists io'', eval env t io f' Rtimeout io''.
-Proof.
-  inversion 1; subst.
-  intros.
-  invert H.
-  - 
-  induction 1.
-  - destruct f'; intros; try lia; clear H0.
-    eauto with eval.  *)
-
-(* From Ltac2 Require Import Ltac2 Fresh.
-
-Ltac2 destruct_fuel0 () :=
-  match! goal with 
-  | [|- context[eval _ _ _ ?f _ _]] => 
-    let e := in_goal ident:(E) in 
-    destruct constr:(f); eauto with eval;
-    assert (e: S f = f + 1) by lia
-  end.
-
-Ltac2 notation destruct_fuel := destruct_fuel0 (). *)
 
 Ltac destruct_fuel :=  
   match goal with 
@@ -260,10 +244,10 @@ Ltac destruct_fuel :=
     rewrite e in *; clear e
   end.
 
-Ltac solve_eval_timeout_smaller :=
+Ltac solve_eval_min_fuel :=
   match goal with
   | IH: forall _, _ < ?f -> exists _, eval _ _ _ _ _ _,
-    l : ?f' < ?f |- _ => 
+    l : _ < ?f |- _ => 
       specialize (IH _ l) as [? ?];
       eauto with eval
   | IH: forall _, _ < ?f1 -> exists _, eval _ _ _ _ _ _,
@@ -282,123 +266,280 @@ Ltac solve_eval_timeout_smaller :=
       eauto with eval | idtac ]
   end.
 
-Lemma eval_timeout_smaller: forall t env io f v io',
-  eval env t io f (Rval v) io' -> forall f', f' < f -> 
-    exists io'', eval env t io f' Rtimeout io''.
+Ltac instantiate_eval_min_fuel_IH :=
+  match goal with 
+  | IH: ~ is_timeout _ -> exists f_min, eval _ _ _ f_min _ _ /\ _ |- _ =>
+      let f_min := fresh "f_min" in 
+      unshelve epose proof IH _ as [f_min [? ?]]; auto;
+      clear IH
+  end.
+
+Ltac find_min_fuel :=
+  match goal with 
+  | IH1: forall _, _ < ?f_min1 -> _,
+    IH2: forall _, _ < ?f_min2 -> _,
+    IH3: forall _, _ < ?f_min3 -> _ |- _ =>
+      (
+        exists (f_min1 + f_min2 + f_min3 + 1); split; 
+        [eauto with eval; fail | idtac]
+      ) || (
+        exists (f_min1 + f_min3 + f_min2 + 1); split; 
+        [eauto with eval; fail | idtac]
+      ) || (
+        exists (f_min2 + f_min1 + f_min3 + 1); split; 
+        [eauto with eval; fail | idtac]
+      ) || (
+        exists (f_min2 + f_min3 + f_min1 + 1); split; 
+        [eauto with eval; fail | idtac]
+      ) || (
+        exists (f_min3 + f_min1 + f_min2 + 1); split; 
+        [eauto with eval; fail | idtac]
+      ) || (
+        exists (f_min3 + f_min2 + f_min1 + 1); split; 
+        [eauto with eval; fail | idtac]
+      )
+  | IH1: forall _, _ < ?f_min1 -> _,
+    IH2: forall _, _ < ?f_min2 -> _ |- _ =>
+      (
+        exists (f_min1 + f_min2 + 1); split; 
+        [eauto with eval; fail | idtac]
+      ) || (
+        exists (f_min2 + f_min1 + 1); split; 
+        [eauto with eval; fail | idtac]
+      )
+  | IH: forall _, _ < ?f_min -> _ |- _ =>
+      exists (f_min + 1); split; 
+      eauto with eval
+  | |- _ => 
+      exists 1; split; eauto with eval
+  end.
+
+Lemma eval_min_fuel: forall t env io f r io',
+  ~ (is_timeout r) -> 
+  eval env t io f r io' -> 
+  exists f_min, eval env t io f_min r io' /\
+  (forall f', f' < f_min -> 
+    exists io'', eval env t io f' Rtimeout io'').
 Proof.
-  induction 1; intros;
-  destruct_fuel;
-  repeat simpl_lia || solve_eval_timeout_smaller.
+  intros t env io f r io' HR;
+  induction 1;
+  repeat instantiate_eval_min_fuel_IH;
+  try solve [
+    find_min_fuel; intros;
+    destruct_fuel;
+    repeat simpl_lia || solve_eval_min_fuel
+  ]; try solve [
+    destruct r; eauto with eval
+  ].
+  unfold is_timeout in HR; auto with exfalso.
 Qed.
 
-Ltac instantiate_eval_timeout_smaller :=
+Ltac rewrite_S_fuel :=
+  match goal with 
+  | |- eval _ _ _ (S ?n) _ _ =>
+      rewrite_S n
+  end.
+
+Lemma eval_min_fuel': forall f f' env t io r io',
+  ~ (is_timeout r) ->
+  eval env t io f r io' ->
+    f <= f' -> eval env t io f' r io'.
+Proof.
+  induction 3; try rewrite_S_fuel; auto with eval.
+Qed. 
+
+(* Ltac instantiate_eval_min_fuel :=
   match goal with 
   | H: eval _ _ _ ?f (Rval ?v) _,
     A: _ < ?f |- _ => 
-      pose proof eval_timeout_smaller _ _ _ _ _ _ H _ A as [? ?]
-  end.
+      pose proof eval_min_fuel _ _ _ _ _ _ H _ A as [? ?]
+  end. *)
   
 #[global]
-Hint Resolve eval_timeout_smaller : eval.
+Hint Resolve eval_min_fuel eval_min_fuel': eval.
+(* #[global]
+Hint Extern 50 => instantiate_eval_min_fuel. *)
 
-(* Theorem eval_total: forall t env io, 
-  (exists f io', eval env t io f Rerr io')
-  \/ (exists f io', eval env t io f Reoi io')
-  \/ (exists v f io', eval env t io f (Rval v) io')
-  \/ (forall f, exists io', eval env t io f Rtimeout io').
+(* Lemma eval_var_either_err_or_succeed: forall f env io,
+  .
 Proof.
-  induction t0; intros.
-  - (* Var n *)
-    destruct (lookup env n) eqn:E;
-    intuition eauto with eval.
-  - (* Const l *)
-    intuition eauto with eval.
-  - (* Let c t0_1 t0_2 *)
-    specialize (IHt0_1 env io).
-    repeat destruct_or_H || destruct_exist;
-    intuition eauto with eval.
-    + (* t0_1 reduces to value x0 *)
-      specialize (IHt0_2 (Env.add env x x0) x2).
-      repeat destruct_or_H || destruct_exist;
-      intuition eauto with eval.
-      (* t0_2 diverges *)
-      repeat right.
-      destruct f; eauto with eval.
-      assert (A: S f = f + 1) by lia;
-      rewrite A in *; clear A.
-      destruct (lt_dec f x1); 
-      try solve [
-        instantiate_eval_timeout_smaller;
-        eauto with eval
-      ].
-      simpl_lia.
-
-      specialize (H0 f0) as [? ?].
-      eauto with eval.
-    + (* t0_1 diverges *)
-      repeat right.
-      intro.
-      destruct_fuel.
-      specialize (H f) as [? ?].
-      eauto with eval.
-  - (* LetRec f t0 *)
-    destruct f.
-    specialize (IHt0 (Env.add env fname (Fun (Func fname arg body) env)) io);
-    repeat destruct_or_H || destruct_exist;
-    intuition eauto with eval.
-    
-    repeat right.
-    intros.
-    destruct_fuel.
-    specialize (H f) as [? ?];
-    eauto with eval.
-  - (* App t0_1 t0_2 *)
-    admit.
-  - (* In *)
-    destruct io eqn:E.
-    destruct input0 eqn:E';
-    intuition eauto with eval.
-  - (* Out *)
-    specialize (IHt0 env io);
-    repeat destruct_exist || destruct_or_H;
-    intuition eauto with eval.
-    + destruct x;
-      try solve [
-        left;
-        exists (x0 + 1), x1;
-        eapply eval_out_err';
-        eauto; auto
-      ].
-      destruct l;
-      try solve [
-        left;
-        exists (x0 + 1), x1;
-        eapply eval_out_err';
-        eauto; auto
-      ].
-      destruct x1 eqn:E.
-      intuition eauto with eval.
-    + repeat right; intros.
-      destruct_fuel.
-      specialize (H f) as [? ?].
-      eauto with eval.
-  -  
-
-    intuition eauto with eval lia.
-      
-
-      specialize (H0 (f - x1)).
-      reduce.
-      destruct (lt_dec x1 f).
-      * (* we have enough fuel to compute t0_1 *)
-        assert (A: f = x1 + (f - x1 - 1) + 1). 
-        lia.
-      subst; rewrite A.
-      exists x3.
-      eapply (eval_let _ _ _ _ _ _ _ _ _ _ _).
-      constructor; eauto.
-      eauto with eval lia.
-    
+  
 Qed. *)
 
+Ltac solve_error_cases :=
+  match goal with 
+  | H: eval _ _ _ _ ?r ?io' |- _ =>
+      exists r, io'; eauto with eval
+  end.
 
+Lemma eval_total_ind: forall f f' t env io, f' < f -> exists r io',
+  eval env t io f' r io'.
+Proof.
+  induction f; try lia; try simpl_lia.
+  destruct t0; intros.
+  (* destruct_fuel; simpl_lia. *)
+  - (* Var n *)
+    destruct_fuel; simpl_lia.
+    destruct (lookup env n) eqn:E.
+    + exists (Rval v), io.
+      apply (eval_min_fuel' 1); auto with eval lia.
+    + exists Rerr, io.
+      apply (eval_min_fuel' 1); auto with eval lia.
+  - (* Const l *) 
+    destruct_fuel; simpl_lia.
+    exists (Rval (Lit l)), io.
+    apply (eval_min_fuel' 1); auto with eval lia.
+  - (* Let *) 
+    destruct_fuel; simpl_lia.
+    unshelve epose proof IHf f' t0_1 env io _ as [r [io' ?]]; eauto with lia.
+    destruct r; try solve [solve_error_cases].
+    unshelve epose proof eval_min_fuel _ _ _ _ _ _ _ H as [f0_min [? ?]]; eauto with eval.
+    destruct (lt_dec f' f0_min).
+    + specialize (H1 _ l) as [io'' ?].
+      exists Rtimeout, io''; eauto with eval.
+    + simpl_lia.
+      unshelve epose proof IHf f'0 t0_2 (Env.add env x v) io' _ as [r [io'' ?]];
+      eauto with eval lia.
+  - (* LetRec *)  
+    destruct_fuel; simpl_lia.
+    destruct f0 eqn:F.
+    unshelve epose proof IHf f' t0 (Env.add env fname (Fun f0 env)) io A as [r [io' ?]].
+    subst; eauto with eval.
+  - (* App *) 
+    destruct_fuel; simpl_lia.
+    unshelve epose proof IHf f' t0_1 env io _ as [r [io' ?]]; eauto with lia.
+    destruct r; try solve [solve_error_cases].
+    destruct v;
+    try solve [
+      (* Solve not function cases *)
+      exists Rerr, io';
+      eapply eval_app_err'; eauto with eval; 
+      autounfold with eval; auto
+    ].
+    destruct f0 eqn:F.
+    unshelve epose proof eval_min_fuel _ _ _ _ _ _ _ H as [f0_min [? ?]]; eauto with eval;
+    clear H.
+    destruct (lt_dec f' f0_min).
+    + specialize (H1 _ l) as [io'' ?].
+      exists Rtimeout, io''; eauto with eval.
+    + simpl_lia.
+      unshelve epose proof IHf f'0 t0_2 env io' _ as [r [io'' ?]]; eauto with lia.
+      destruct r; try solve [solve_error_cases].
+      unshelve epose proof eval_min_fuel _ _ _ _ _ _ _ H as [f1_min [? ?]]; eauto with eval; clear H.
+      destruct (lt_dec f'0 f1_min).
+      * specialize (H3 _ l) as [io0 ?].
+        exists Rtimeout, io0; eauto with eval.
+      * repeat simpl_lia.
+        unshelve epose proof IHf f'1 body (Env.add (Env.add e arg v) fname (Fun (Func fname arg body) e)) io'' _ as [r [io''' ?]]; eauto with lia.
+        eauto with eval.
+  - (* In *)  
+    destruct_fuel; simpl_lia.
+    destruct io eqn:E.
+    destruct input.
+    + exists Reoi, io.
+      apply (eval_min_fuel' 1); subst; eauto with lia eval.
+    + exists (Rval (Lit (IntLit z))), {|input:= input; output:=output|}.
+      apply (eval_min_fuel' 1); eauto with lia eval.
+  - (* Out *)  
+    destruct_fuel; simpl_lia.
+    unshelve epose proof IHf f' t0 env io A as [r [io' ?]].
+    destruct r; try solve [solve_error_cases].
+    destruct v;
+    try solve [
+      (* Solve not literal cases *)
+      exists Rerr, io';
+      eapply eval_out_err'; eauto with eval;
+      autounfold with eval; auto
+    ].
+    destruct l;
+    try solve [
+      (* Solve not integer literal cases *)
+      exists Rerr, io';
+      eapply eval_out_err'; eauto with eval; 
+      autounfold with eval; auto
+    ].
+    destruct io'.
+    exists (Rval (Lit UnitLit)), {|input:=input;output:=n::output|}.
+    eauto with eval.
+  - (* Ite *) 
+    destruct_fuel; simpl_lia.
+    unshelve epose proof IHf f' t0_1 env io A as [r [io' ?]].
+    destruct r; try solve [solve_error_cases].
+    destruct v;
+    try solve [
+      (* Solve not literal cases *)
+      exists Rerr, io';
+      eapply eval_ite_err'; eauto with eval;
+      autounfold with eval; auto
+    ].
+    destruct l;
+    try solve [
+      (* Solve not boolean literal cases *)
+      exists Rerr, io';
+      eapply eval_ite_err'; eauto with eval;
+      autounfold with eval; auto
+    ].
+    destruct b.
+    + unshelve epose proof eval_min_fuel _ _ _ _ _ _ _ H as [f0_min [? ?]]; eauto with eval; clear H.
+      destruct (lt_dec f' f0_min).
+      * specialize (H1 _ l) as [io0 ?].
+        exists Rtimeout, io0; eauto with eval.
+      * simpl_lia; clear H1.
+        unshelve epose proof IHf f'0 t0_2 env io' _ as [r [io'' ?]]; eauto with lia.
+        eauto with eval.  
+    + unshelve epose proof eval_min_fuel _ _ _ _ _ _ _ H as [f0_min [? ?]]; eauto with eval; clear H.
+      destruct (lt_dec f' f0_min).
+      * specialize (H1 _ l) as [io0 ?].
+        exists Rtimeout, io0; eauto with eval.
+      * simpl_lia; clear H1.
+        unshelve epose proof IHf f'0 t0_3 env io' _ as [r [io'' ?]]; eauto with lia.
+        eauto with eval.  
+  - (* Binary primitives *)
+    destruct_fuel; simpl_lia.
+    unshelve epose proof IHf f' t0_1 env io A as [r [io' ?]].
+    destruct r; try solve [solve_error_cases].
+    unshelve epose proof eval_min_fuel _ _ _ _ _ _ _ H as [f0_min [? ?]]; eauto with eval; clear H.
+    destruct (lt_dec f' f0_min).
+    * specialize (H1 _ l) as [io0 ?].
+      exists Rtimeout, io0; eauto with eval.
+    * simpl_lia; clear H1.
+      unshelve epose proof IHf f'0 t0_2 env io' _ as [r [io'' ?]]; try lia.
+      destruct r; try solve [solve_error_cases]. eauto with eval.
+  - (* Unary primitives *) 
+    destruct_fuel; simpl_lia.
+    unshelve epose proof IHf f' t0 env io A as [r [io' ?]].
+    destruct r; try solve [solve_error_cases]. eauto with eval.
+  - (* Match *) 
+    destruct_fuel; simpl_lia.
+    unshelve epose proof IHf f' t0 env io A as [r [io' ?]].
+    destruct r; try solve [solve_error_cases]. 
+    destruct v;
+    try solve [
+      (* Solve not either cases *)
+      exists Rerr, io';
+      eapply eval_match_err'; eauto with eval;
+      autounfold with eval; auto
+    ].
+    + (* Left *)
+      unshelve epose proof eval_min_fuel _ _ _ _ _ _ _ H as [f0_min [? ?]]; eauto with eval; clear H.
+      destruct (lt_dec f' f0_min).
+      * specialize (H1 _ l) as [io0 ?].
+        exists Rtimeout, io0; eauto with eval.
+      * simpl_lia; clear H1.
+        destruct lcase eqn:L.
+        unshelve epose proof IHf f'0 t1 (Env.add env n v) io' _ as [r [io'' ?]]; eauto with lia eval.
+    + (* Right *)
+      unshelve epose proof eval_min_fuel _ _ _ _ _ _ _ H as [f0_min [? ?]]; eauto with eval; clear H.
+      destruct (lt_dec f' f0_min).
+      * specialize (H1 _ l) as [io0 ?].
+        exists Rtimeout, io0; eauto with eval.
+      * simpl_lia; clear H1.
+        destruct rcase eqn:L.
+        unshelve epose proof IHf f'0 t1 (Env.add env n v) io' _ as [r [io'' ?]]; eauto with lia eval.
+Qed.
+
+Theorem eval_total: forall t env io f,
+  exists r io', eval env t io f r io'.
+Proof.
+  eauto using eval_total_ind.
+Qed.
