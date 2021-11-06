@@ -90,7 +90,9 @@ Definition compute_binary_op op v1 v2 :=
   | Add, Lit (IntLit n1), Lit (IntLit n2) => Rval (Lit (IntLit (n1 + n2)))
   | Sub, Lit (IntLit n1), Lit (IntLit n2) => Rval (Lit (IntLit (n1 - n2)))
   | Mul, Lit (IntLit n1), Lit (IntLit n2) => Rval (Lit (IntLit (n1 * n2)))
+  | Div, Lit (IntLit n1), Lit (IntLit 0) => Rerr
   | Div, Lit (IntLit n1), Lit (IntLit n2) => Rval (Lit (IntLit (n1 / n2)))
+  | Mod, Lit (IntLit n1), Lit (IntLit 0) => Rerr
   | Mod, Lit (IntLit n1), Lit (IntLit n2) => Rval (Lit (IntLit (n1 mod n2)))
   | Lt, Lit (IntLit n1), Lit (IntLit n2) => Rval (Lit (BoolLit (n1 <? n2)))
   | Le, Lit (IntLit n1), Lit (IntLit n2) => Rval (Lit (BoolLit (n1 <=? n2)))
@@ -348,23 +350,26 @@ Proof.
   induction 3; try rewrite_S_fuel; auto with eval.
 Qed. 
 
-(* Ltac instantiate_eval_min_fuel :=
+Ltac instantiate_eval_min_fuel t :=
   match goal with 
-  | H: eval _ _ _ ?f (Rval ?v) _,
-    A: _ < ?f |- _ => 
-      pose proof eval_min_fuel _ _ _ _ _ _ H _ A as [? ?]
-  end. *)
+  | H: eval _ t _ ?f (Rval _) _ |- _ => 
+      let f_min := fresh "f_min" in
+      let H_eval := fresh "H_eval" in 
+      let H' := fresh "H" in
+      unshelve epose proof eval_min_fuel _ _ _ _ _ _ _ H as [f_min [H_eval H']];
+      auto with eval; clear H;
+      let l := fresh "l" in 
+      let r := fresh "r" in
+      destruct (lt_dec f f_min) as [l | r];
+      [
+        let io := fresh "io" in    
+        apply (H' _) in l as [io ?];
+        exists Rtimeout, io; eauto with eval | repeat simpl_lia; clear H'
+      ]
+  end.
   
 #[global]
 Hint Resolve eval_min_fuel eval_min_fuel': eval.
-(* #[global]
-Hint Extern 50 => instantiate_eval_min_fuel. *)
-
-(* Lemma eval_var_either_err_or_succeed: forall f env io,
-  .
-Proof.
-  
-Qed. *)
 
 Ltac solve_error_cases :=
   match goal with 
@@ -372,170 +377,116 @@ Ltac solve_error_cases :=
       exists r, io'; eauto with eval
   end.
 
+Ltac instantiate_eval_total_ind_IH env t io f :=
+  match goal with
+  | IH: forall f' t env io, f' < _ -> exists r io', eval env t io f' r io' |- _ =>
+      let r := fresh "r" in
+      let io' := fresh "io" in
+      unshelve epose proof IH f t env io _ as [r [io' ?]]; subst;
+      eauto with eval lia; destruct r; try solve [solve_error_cases]
+  end.
+
 Lemma eval_total_ind: forall f f' t env io, f' < f -> exists r io',
   eval env t io f' r io'.
 Proof.
   induction f; try lia; try simpl_lia.
-  destruct t0; intros.
-  (* destruct_fuel; simpl_lia. *)
+  destruct t0; intros;
+  destruct_fuel; simpl_lia.
   - (* Var n *)
-    destruct_fuel; simpl_lia.
-    destruct (lookup env n) eqn:E.
-    + exists (Rval v), io.
-      apply (eval_min_fuel' 1); auto with eval lia.
-    + exists Rerr, io.
-      apply (eval_min_fuel' 1); auto with eval lia.
+    destruct (lookup env n) eqn:E;
+    [exists (Rval v) | exists Rerr];
+    eauto with eval lia.
   - (* Const l *) 
-    destruct_fuel; simpl_lia.
-    exists (Rval (Lit l)), io.
-    apply (eval_min_fuel' 1); auto with eval lia.
+    exists (Rval (Lit l)); eauto with eval lia.
   - (* Let *) 
-    destruct_fuel; simpl_lia.
-    unshelve epose proof IHf f' t0_1 env io _ as [r [io' ?]]; eauto with lia.
-    destruct r; try solve [solve_error_cases].
-    unshelve epose proof eval_min_fuel _ _ _ _ _ _ _ H as [f0_min [? ?]]; eauto with eval.
-    destruct (lt_dec f' f0_min).
-    + specialize (H1 _ l) as [io'' ?].
-      exists Rtimeout, io''; eauto with eval.
-    + simpl_lia.
-      unshelve epose proof IHf f'0 t0_2 (Env.add env x v) io' _ as [r [io'' ?]];
-      eauto with eval lia.
+    instantiate_eval_total_ind_IH env t0_1 io f'.
+    instantiate_eval_min_fuel t0_1.
+    instantiate_eval_total_ind_IH (Env.add env x v) t0_2 io0 f'0.
   - (* LetRec *)  
-    destruct_fuel; simpl_lia.
     destruct f0 eqn:F.
-    unshelve epose proof IHf f' t0 (Env.add env fname (Fun f0 env)) io A as [r [io' ?]].
-    subst; eauto with eval.
+    instantiate_eval_total_ind_IH (Env.add env fname (Fun f0 env)) t0 io f'.
   - (* App *) 
-    destruct_fuel; simpl_lia.
-    unshelve epose proof IHf f' t0_1 env io _ as [r [io' ?]]; eauto with lia.
-    destruct r; try solve [solve_error_cases].
+    instantiate_eval_total_ind_IH env t0_1 io f'.
     destruct v;
     try solve [
       (* Solve not function cases *)
-      exists Rerr, io';
+      exists Rerr, io0;
       eapply eval_app_err'; eauto with eval; 
       autounfold with eval; auto
     ].
     destruct f0 eqn:F.
-    unshelve epose proof eval_min_fuel _ _ _ _ _ _ _ H as [f0_min [? ?]]; eauto with eval;
-    clear H.
-    destruct (lt_dec f' f0_min).
-    + specialize (H1 _ l) as [io'' ?].
-      exists Rtimeout, io''; eauto with eval.
-    + simpl_lia.
-      unshelve epose proof IHf f'0 t0_2 env io' _ as [r [io'' ?]]; eauto with lia.
-      destruct r; try solve [solve_error_cases].
-      unshelve epose proof eval_min_fuel _ _ _ _ _ _ _ H as [f1_min [? ?]]; eauto with eval; clear H.
-      destruct (lt_dec f'0 f1_min).
-      * specialize (H3 _ l) as [io0 ?].
-        exists Rtimeout, io0; eauto with eval.
-      * repeat simpl_lia.
-        unshelve epose proof IHf f'1 body (Env.add (Env.add e arg v) fname (Fun (Func fname arg body) e)) io'' _ as [r [io''' ?]]; eauto with lia.
-        eauto with eval.
+    instantiate_eval_min_fuel t0_1.
+    instantiate_eval_total_ind_IH env t0_2 io0 f'0.
+    instantiate_eval_min_fuel t0_2.
+    instantiate_eval_total_ind_IH (Env.add (Env.add e arg v) fname (Fun (Func fname arg body) e)) body io1 f'1.
   - (* In *)  
-    destruct_fuel; simpl_lia.
     destruct io eqn:E.
-    destruct input.
-    + exists Reoi, io.
-      apply (eval_min_fuel' 1); subst; eauto with lia eval.
-    + exists (Rval (Lit (IntLit z))), {|input:= input; output:=output|}.
-      apply (eval_min_fuel' 1); eauto with lia eval.
+    destruct input; 
+    [exists Reoi | exists (Rval (Lit (IntLit z)))];
+    eauto with eval lia.
   - (* Out *)  
-    destruct_fuel; simpl_lia.
-    unshelve epose proof IHf f' t0 env io A as [r [io' ?]].
-    destruct r; try solve [solve_error_cases].
+    instantiate_eval_total_ind_IH env t0 io f'.
     destruct v;
     try solve [
       (* Solve not literal cases *)
-      exists Rerr, io';
+      exists Rerr, io0;
       eapply eval_out_err'; eauto with eval;
       autounfold with eval; auto
     ].
     destruct l;
     try solve [
       (* Solve not integer literal cases *)
-      exists Rerr, io';
+      exists Rerr, io0;
       eapply eval_out_err'; eauto with eval; 
       autounfold with eval; auto
     ].
-    destruct io'.
-    exists (Rval (Lit UnitLit)), {|input:=input;output:=n::output|}.
+    destruct io0.
+    exists (Rval (Lit UnitLit));
     eauto with eval.
   - (* Ite *) 
-    destruct_fuel; simpl_lia.
-    unshelve epose proof IHf f' t0_1 env io A as [r [io' ?]].
-    destruct r; try solve [solve_error_cases].
+    instantiate_eval_total_ind_IH env t0_1 io f'.
     destruct v;
     try solve [
       (* Solve not literal cases *)
-      exists Rerr, io';
+      exists Rerr, io0;
       eapply eval_ite_err'; eauto with eval;
       autounfold with eval; auto
     ].
     destruct l;
     try solve [
       (* Solve not boolean literal cases *)
-      exists Rerr, io';
+      exists Rerr, io0;
       eapply eval_ite_err'; eauto with eval;
       autounfold with eval; auto
     ].
+    instantiate_eval_min_fuel t0_1.
     destruct b.
-    + unshelve epose proof eval_min_fuel _ _ _ _ _ _ _ H as [f0_min [? ?]]; eauto with eval; clear H.
-      destruct (lt_dec f' f0_min).
-      * specialize (H1 _ l) as [io0 ?].
-        exists Rtimeout, io0; eauto with eval.
-      * simpl_lia; clear H1.
-        unshelve epose proof IHf f'0 t0_2 env io' _ as [r [io'' ?]]; eauto with lia.
-        eauto with eval.  
-    + unshelve epose proof eval_min_fuel _ _ _ _ _ _ _ H as [f0_min [? ?]]; eauto with eval; clear H.
-      destruct (lt_dec f' f0_min).
-      * specialize (H1 _ l) as [io0 ?].
-        exists Rtimeout, io0; eauto with eval.
-      * simpl_lia; clear H1.
-        unshelve epose proof IHf f'0 t0_3 env io' _ as [r [io'' ?]]; eauto with lia.
-        eauto with eval.  
+    + instantiate_eval_total_ind_IH env t0_2 io0 f'0.
+    + instantiate_eval_total_ind_IH env t0_3 io0 f'0.
   - (* Binary primitives *)
-    destruct_fuel; simpl_lia.
-    unshelve epose proof IHf f' t0_1 env io A as [r [io' ?]].
-    destruct r; try solve [solve_error_cases].
-    unshelve epose proof eval_min_fuel _ _ _ _ _ _ _ H as [f0_min [? ?]]; eauto with eval; clear H.
-    destruct (lt_dec f' f0_min).
-    * specialize (H1 _ l) as [io0 ?].
-      exists Rtimeout, io0; eauto with eval.
-    * simpl_lia; clear H1.
-      unshelve epose proof IHf f'0 t0_2 env io' _ as [r [io'' ?]]; try lia.
-      destruct r; try solve [solve_error_cases]. eauto with eval.
+    instantiate_eval_total_ind_IH env t0_1 io f'.
+    instantiate_eval_min_fuel t0_1.
+    instantiate_eval_total_ind_IH env t0_2 io0 f'0.
+    eauto with eval.
   - (* Unary primitives *) 
-    destruct_fuel; simpl_lia.
-    unshelve epose proof IHf f' t0 env io A as [r [io' ?]].
-    destruct r; try solve [solve_error_cases]. eauto with eval.
+    instantiate_eval_total_ind_IH env t0 io f'.
+    eauto with eval.
   - (* Match *) 
-    destruct_fuel; simpl_lia.
-    unshelve epose proof IHf f' t0 env io A as [r [io' ?]].
-    destruct r; try solve [solve_error_cases]. 
+    instantiate_eval_total_ind_IH env t0 io f'.
     destruct v;
     try solve [
       (* Solve not either cases *)
-      exists Rerr, io';
+      exists Rerr, io0;
       eapply eval_match_err'; eauto with eval;
       autounfold with eval; auto
-    ].
+    ];
+    instantiate_eval_min_fuel t0.
     + (* Left *)
-      unshelve epose proof eval_min_fuel _ _ _ _ _ _ _ H as [f0_min [? ?]]; eauto with eval; clear H.
-      destruct (lt_dec f' f0_min).
-      * specialize (H1 _ l) as [io0 ?].
-        exists Rtimeout, io0; eauto with eval.
-      * simpl_lia; clear H1.
-        destruct lcase eqn:L.
-        unshelve epose proof IHf f'0 t1 (Env.add env n v) io' _ as [r [io'' ?]]; eauto with lia eval.
+      destruct lcase eqn:L.
+      instantiate_eval_total_ind_IH (Env.add env n v) t1 io0 f'0.
     + (* Right *)
-      unshelve epose proof eval_min_fuel _ _ _ _ _ _ _ H as [f0_min [? ?]]; eauto with eval; clear H.
-      destruct (lt_dec f' f0_min).
-      * specialize (H1 _ l) as [io0 ?].
-        exists Rtimeout, io0; eauto with eval.
-      * simpl_lia; clear H1.
-        destruct rcase eqn:L.
-        unshelve epose proof IHf f'0 t1 (Env.add env n v) io' _ as [r [io'' ?]]; eauto with lia eval.
+      destruct rcase eqn:R.
+      instantiate_eval_total_ind_IH (Env.add env n v) t1 io0 f'0.
 Qed.
 
 Theorem eval_total: forall t env io f,
