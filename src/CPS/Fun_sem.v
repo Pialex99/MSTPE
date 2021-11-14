@@ -96,6 +96,18 @@ Definition unary_op_atom env op a :=
     | _ => None 
     end.
 
+Definition get_cnt0 (env : env (cnt * env value)) c := 
+  match lookup env c with
+  | Some (Cnt0 c' body, env') => if c =? c' then Some (Cnt0 c' body, env') else None 
+  | _ => None
+  end.
+
+Definition get_cnt1 (env : env (cnt * env value)) c := 
+  match lookup env c with
+  | Some (Cnt1 c' arg body, env') => if c =? c' then Some (Cnt1 c' arg body, env') else None 
+  | _ => None
+  end.
+
 Inductive eval : env value -> env (cnt * (env value)) -> term -> IO -> nat -> result -> IO -> Prop :=
 | eval_letB : forall envV envC n op a1 a2 rest io f v r io',
     binary_op_atom envV op a1 a2 = Some v ->
@@ -141,22 +153,22 @@ Inductive eval : env value -> env (cnt * (env value)) -> term -> IO -> nat -> re
     get_value_atom envV a = Some v ->
       eval envV envC (LetOut n a rest) io 1 Rerr io
 | eval_AppC0 : forall envV envC c cbody envV' io f r io',
-    lookup envC c = Some (Cnt0 c cbody, envV') ->
+    get_cnt0 envC c = Some (Cnt0 c cbody, envV') ->
     eval envV' empty cbody io f r io' ->
       eval envV envC (AppC0 c) io (f + 1) r io'
 | eval_AppC0_err : forall envV envC c io,
-    lookup envC c = None ->
+    get_cnt0 envC c = None ->
       eval envV envC (AppC0 c) io 1 Rerr io
 | eval_AppC1 : forall envV envC c a v cbody carg envV' io f r io',
-    lookup envC c = Some (Cnt1 c carg cbody, envV') ->
+    get_cnt1 envC c = Some (Cnt1 c carg cbody, envV') ->
     get_value_atom envV a = Some v ->
     eval (Env.add envV' carg v) empty cbody io f r io' ->
       eval envV envC (AppC1 c a) io (f + 1) r io'
 | eval_AppC1_err : forall envV envC c a io,
-    lookup envC c = None ->
+    get_cnt1 envC c = None ->
       eval envV envC (AppC1 c a) io 1 Rerr io
 | eval_AppC1_err' : forall envV envC c a cbody carg envV' io,
-    lookup envC c = Some (Cnt1 c carg cbody, envV') ->
+    get_cnt1 envC c = Some (Cnt1 c carg cbody, envV') ->
     get_value_atom envV a = None ->
       eval envV envC (AppC1 c a) io 1 Rerr io
 | eval_AppF : forall envV envC af fname fretC farg fbody fenv c carg cbody cenv a v io f r io',
@@ -164,7 +176,7 @@ Inductive eval : env value -> env (cnt * (env value)) -> term -> IO -> nat -> re
     let cnt := Cnt1 c carg cbody in
     get_value_atom envV af = Some (Fun fnt fenv) ->
     get_value_atom envV a = Some v ->
-    lookup envC c = Some (cnt, cenv) ->
+    get_cnt1 envC c = Some (cnt, cenv) ->
     eval (Env.add (Env.add fenv fname (Fun fnt fenv)) farg v) (Env.add empty fretC (cnt, cenv)) fbody io f r io' ->
       eval envV envC (AppF af c a) io (f + 1) r io'
 | eval_AppF_err : forall envV envC af c a io,
@@ -183,27 +195,27 @@ Inductive eval : env value -> env (cnt * (env value)) -> term -> IO -> nat -> re
     let fnt := Fnt fname fretC farg fbody in
     get_value_atom envV af = Some (Fun fnt fenv) ->
     get_value_atom envV a = Some v ->
-    lookup envC c = None ->
+    get_cnt1 envC c = None ->
       eval envV envC (AppF af c a) io 1 Rerr io
 | eval_Ite_true : forall envV envC c thenC elseC cbody cenv io f r io',
     let cnt := Cnt0 thenC cbody in 
     get_value_atom envV c = Some (Lit (BoolLit true)) ->
-    lookup envC thenC = Some (cnt, cenv) ->
+    get_cnt0 envC thenC = Some (cnt, cenv) ->
     eval cenv empty cbody io f r io' ->
       eval envV envC (Ite c thenC elseC) io (f + 1) r io'
 | eval_Ite_true_err : forall envV envC c thenC elseC io,
     get_value_atom envV c = Some (Lit (BoolLit true)) ->
-    lookup envC thenC = None ->
+    get_cnt0 envC thenC = None ->
       eval envV envC (Ite c thenC elseC) io 1 Rerr io
-| eval_Ite_flase : forall envV envC c thenC elseC cbody cenv io f r io',
-    let cnt := Cnt0 thenC cbody in 
+| eval_Ite_false : forall envV envC c thenC elseC cbody cenv io f r io',
+    let cnt := Cnt0 elseC cbody in 
     get_value_atom envV c = Some (Lit (BoolLit false)) ->
-    lookup envC elseC = Some (cnt, cenv) ->
+    get_cnt0 envC elseC = Some (cnt, cenv) ->
     eval cenv empty cbody io f r io' ->
       eval envV envC (Ite c thenC elseC) io (f + 1) r io'
 | eval_Ite_false_err : forall envV envC c thenC elseC io,
     get_value_atom envV c = Some (Lit (BoolLit false)) ->
-    lookup envC elseC = None ->
+    get_cnt0 envC elseC = None ->
       eval envV envC (Ite c thenC elseC) io 1 Rerr io
 | eval_Ite_err : forall envV envC c thenC elseC io,
     get_value_atom envV c = None ->
@@ -217,5 +229,270 @@ Inductive eval : env value -> env (cnt * (env value)) -> term -> IO -> nat -> re
       eval envV envC (Halt a) io 1 (Rhalt v) io
 | eval_halt_err : forall envV envC a io,
     get_value_atom envV a = None ->
-      eval envV envC (Halt a) io 1 Rerr io.
+      eval envV envC (Halt a) io 1 Rerr io
+| eval_timeout : forall envV envC t io,
+      eval envV envC t io 0 Rtimeout io
+| eval_extra_fuel : forall envV envC t io f r io',
+    r <> Rtimeout ->
+    eval envV envC t io f r io' ->
+      eval envV envC t io (f + 1) r io'.
 
+#[global]
+Hint Constructors eval : eval.
+
+Ltac destruct_fuel :=  
+  match goal with 
+  | [|- context[eval _ _ _ _ ?f _ _]] =>
+    let e := fresh "E" in 
+    destruct f; eauto with eval;
+    assert (e: S f = f + 1) by lia;
+    rewrite e in *; clear e
+  end.
+
+Ltac solve_error_cases :=
+  match goal with 
+  | |- _ => 
+    exists 1; intuition eauto with eval;
+    destruct_fuel; repeat simpl_lia
+  end.
+
+Ltac solve_induction_cases :=
+  match goal with 
+  | H : ?r <> Rtimeout,
+    IH: ?r <> Rtimeout -> _ |- _ => 
+      let f_min := fresh "f_min" in
+      let H_eval := fresh "H_eval" in
+      let H_timeout := fresh "H_timeout" in
+      specialize (IH H) as [f_min [H_eval H_timeout]];
+      exists (f_min + 1); intuition eauto with eval
+  end.
+
+Ltac solve_timeout_cases :=
+  match goal with 
+  | A : ?f < ?f_min,
+    H_timeout : forall _, _ < ?f_min -> _ |- _ =>
+      let io_final := fresh "io_final" in
+      specialize (H_timeout _ A) as [io_final ?];
+      eauto with eval
+  end.
+
+Lemma eval_min_fuel: forall t envV envC io f r io',
+  r <> Rtimeout -> 
+  eval envV envC t io f r io' -> 
+  exists f_min, eval envV envC t io f_min r io' /\
+  (forall f', f' < f_min -> 
+    exists io'', eval envV envC t io f' Rtimeout io'').
+Proof.
+  induction 2; try solve [solve_error_cases];
+  try solve [solve_induction_cases; 
+    destruct_fuel; simpl_lia;
+    solve_timeout_cases].
+  - (* LetC0 *)
+    solve_induction_cases.
+    subst cnt; eauto with eval.
+    destruct_fuel; simpl_lia.
+    solve_timeout_cases.
+    subst cnt; eauto with eval.
+  - (* LetC1 *) 
+    solve_induction_cases.
+    subst cnt; eauto with eval.
+    destruct_fuel; simpl_lia.
+    solve_timeout_cases.
+    subst cnt; eauto with eval.
+  - (* LetF *) 
+    solve_induction_cases.
+    subst fnt; eauto with eval.
+    destruct_fuel; simpl_lia.
+    solve_timeout_cases.
+    subst fnt; eauto with eval.
+  - (* LetIn *) 
+    subst io.
+    exists 1.
+    intuition eauto with eval.
+    destruct_fuel; repeat simpl_lia.
+  - auto.
+Qed. 
+
+Ltac rewrite_S_fuel :=
+  match goal with 
+  | |- eval _ _ _ _ (S ?n) _ _ =>
+      rewrite_S n
+  end.
+
+Lemma eval_min_fuel': forall f f' envV envC t io r io',
+  r <> Rtimeout ->
+  eval envV envC t io f r io' ->
+    f <= f' -> eval envV envC t io f' r io'.
+Proof.
+  induction 3; try rewrite_S_fuel; eauto with eval.
+Qed.
+  
+#[global]
+Hint Resolve eval_min_fuel eval_min_fuel': eval.
+
+Ltac total_ind_solve_error_case :=
+  match goal with 
+  | |- context[eval _ _ _ ?io _ _ _] =>
+    let H := fresh "H" in
+    exists Rerr, io;
+    apply (eval_min_fuel' 1); eauto with eval lia;
+    intro H; discriminate H
+  end.
+
+Lemma eval_total_ind: forall f f' t envV envC io, f' < f -> exists r io',
+  eval envV envC t io f' r io'.
+Proof.
+  induction f; try lia.
+  destruct t0; intros;
+  destruct_fuel; simpl_lia.
+  - (* LetB *)
+    destruct (binary_op_atom envV op a1 a2) eqn:E; try total_ind_solve_error_case.
+    specialize (IHf _ t0 (Env.add envV name v) envC io A) as [r [io' ?]].
+    eauto with eval.
+  - (* LetU *) 
+    destruct (unary_op_atom envV op a) eqn:E; try total_ind_solve_error_case.
+    specialize (IHf _ t0 (Env.add envV name v) envC io A) as [r [io' ?]].
+    eauto with eval.
+  - (* LetC *) 
+    destruct cont.
+    + (* Cnt0 *)
+      specialize (IHf _ t0 envV (Env.add envC name (Cnt0 name body, envV)) io A) as [r [io' ?]].
+      eauto with eval.
+    + (* Cnt1 *)
+      specialize (IHf _ t0 envV (Env.add envC name (Cnt1 name arg body, envV)) io A) as [r [io' ?]].
+      eauto with eval.
+  - (* LetF *) 
+    destruct f0.
+    specialize (IHf _ t0 (Env.add envV name (Fun (Fnt name retC arg body) envV)) envC io A) as [r [io' ?]].
+    eauto with eval.
+  - (* LetIn *)
+    destruct io.
+    destruct input.
+    + (* nil *) 
+      exists Reoi, {|input:=nil;output:=output|}.
+      apply (eval_min_fuel' 1); eauto with eval lia.
+      intro; discriminate H.
+    + (* z::input *) 
+      specialize (IHf _ t0 (Env.add envV name (Lit (IntLit z))) envC {|input:=input;output:=output|} A) as [r [io' ?]].
+      eauto with eval.
+  - (* LetOut *) 
+    destruct (get_value_atom envV a) eqn:E; try total_ind_solve_error_case.
+    destruct v eqn:V;
+    try solve [
+      exists Rerr, io;
+      apply (eval_min_fuel' 1); eauto with eval lia; [
+      intro; discriminate H |
+      eapply eval_letOut_err'; eauto;
+      unfold is_int_val; auto]
+    ].
+    destruct l eqn:L;
+    try solve [
+      exists Rerr, io;
+      apply (eval_min_fuel' 1); eauto with eval lia; [
+      intro; discriminate H |
+      eapply eval_letOut_err'; eauto;
+      unfold is_int_val; auto]
+    ].
+    destruct io.
+    specialize (IHf _ t0 (Env.add envV n (Lit UnitLit)) envC {|input:=input;output:=n0::output|} A) as [r [io' ?]].
+    eauto with eval.
+  - (* AppC0 *) 
+    destruct (get_cnt0 envC name) eqn:C; try total_ind_solve_error_case.
+    destruct p; destruct c eqn:cnt.
+    + (* Cnt0 *) 
+      assert (name = name0). {
+        unfold get_cnt0 in C.
+        repeat destruct_match; invert C.
+        apply Nat.eqb_eq; auto.
+      }
+      subst.
+      specialize (IHf _ body e empty io A) as [r [io' ?]].
+      eauto with eval.
+    + unfold get_cnt0 in C; repeat destruct_match;
+      invert C.
+  - (* AppC1 *) 
+    destruct (get_cnt1 envC name) eqn:C; try total_ind_solve_error_case.
+    destruct p; destruct c eqn:cnt; try solve [
+    unfold get_cnt1 in C; repeat destruct_match; invert C].
+    (* Cnt1 *) 
+    assert (name = name0). {
+      unfold get_cnt1 in C.
+      repeat destruct_match; invert C.
+      apply Nat.eqb_eq; auto.
+    }
+    subst.
+    destruct (get_value_atom envV a) eqn:V; try total_ind_solve_error_case.
+    specialize (IHf _ body (Env.add e arg v) empty io A) as [r [io' ?]].
+    eauto with eval.
+  - (* AppF *) 
+    destruct (get_value_atom envV f0) eqn:F; try total_ind_solve_error_case.
+    destruct v;
+    try solve [
+      exists Rerr, io;
+      apply (eval_min_fuel' 1); eauto with eval lia; [
+      intro; discriminate H |
+      eapply eval_AppF_err'; eauto;
+      unfold is_fun_val; auto]
+    ].
+    destruct f1.
+    destruct (get_value_atom envV a) eqn:V; try total_ind_solve_error_case.
+    destruct (get_cnt1 envC retC) eqn:C; try total_ind_solve_error_case.
+    destruct p; destruct c; try solve [
+    unfold get_cnt1 in C; repeat destruct_match; invert C].
+    assert (retC = name0). {
+      unfold get_cnt1 in C.
+      repeat destruct_match; invert C.
+      apply Nat.eqb_eq; auto.
+    }
+    subst.
+    specialize (IHf _ body (Env.add (Env.add e name (Fun (Fnt name retC0 arg body) e)) arg v) (Env.add empty retC0 (Cnt1 name0 arg0 body0, e0)) io A) as [r [io' ?]].
+    eauto with eval.
+  - (* Ite *)
+    destruct (get_value_atom envV c) eqn:V; try total_ind_solve_error_case.
+    destruct v;
+    try solve [
+      exists Rerr, io;
+      apply (eval_min_fuel' 1); eauto with eval lia; [
+      intro; discriminate H |
+      eapply eval_Ite_err'; eauto;
+      unfold is_bool_val; auto]
+    ].
+    destruct l;
+    try solve [
+      exists Rerr, io;
+      apply (eval_min_fuel' 1); eauto with eval lia; [
+      intro; discriminate H |
+      eapply eval_Ite_err'; eauto;
+      unfold is_bool_val; auto]
+    ].
+    destruct b.
+    + (* true *)
+      destruct (get_cnt0 envC thenC) eqn:C; try total_ind_solve_error_case.
+      destruct p; destruct c0; try solve [
+      unfold get_cnt0 in C; repeat destruct_match; invert C]. 
+      assert (thenC = name). {
+        unfold get_cnt0 in C.
+        repeat destruct_match; invert C.
+        apply Nat.eqb_eq; auto.
+      }
+      subst.
+      specialize (IHf _ body e empty io A) as [r [io' ?]].
+      eauto with eval.
+    + (* false *)
+      destruct (get_cnt0 envC elseC) eqn:C; try total_ind_solve_error_case.
+      destruct p; destruct c0; try solve [
+      unfold get_cnt0 in C; repeat destruct_match; invert C]. 
+      assert (elseC = name). {
+        unfold get_cnt0 in C.
+        repeat destruct_match; invert C.
+        apply Nat.eqb_eq; auto.
+      }
+      subst.
+      specialize (IHf _ body e empty io A) as [r [io' ?]].
+      eauto with eval.
+  - (* Halt *) 
+    destruct (get_value_atom envV a) eqn:V; try total_ind_solve_error_case.
+    exists (Rhalt v), io.
+    eapply (eval_min_fuel' 1); eauto with eval lia.
+    intro H; discriminate H.
+Qed.
