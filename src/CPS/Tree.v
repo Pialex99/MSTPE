@@ -13,6 +13,7 @@ Inductive term :=
 | AppC1 (name: nat) (a: atom)
 | AppF (f: atom) (retC: nat) (a: atom)
 | Ite (c: atom) (thenC elseC: nat)
+| Match (scrut: atom) (lc rc: nat)
 | Halt (a: atom)
 with 
   cnt := Cnt0 (name: nat) (body: term) | Cnt1 (name arg: nat) (body: term)

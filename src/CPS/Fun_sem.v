@@ -1,5 +1,5 @@
 Require Import Arith Bool List.
-From Utils Require Import Stream Int Env Tactics IO.
+From Utils Require Import Int Env Tactics IO.
 From CPS Require Import Tree.
 
 Inductive value :=
@@ -33,6 +33,13 @@ Definition is_fun_val v :=
 Definition is_bool_val v := 
   match v with
   | Lit (BoolLit _) => True 
+  | _ => False 
+  end.
+
+Definition is_either_val v := 
+  match v with 
+  | Left _ => True 
+  | Right _ => True 
   | _ => False 
   end.
 
@@ -224,6 +231,33 @@ Inductive eval : env value -> env (cnt * (env value)) -> term -> IO -> nat -> re
     ~ (is_bool_val v) ->
     get_value_atom envV c = Some v ->
       eval envV envC (Ite c thenC elseC) io 1 Rerr io
+| eval_match_left : forall envV envC scrut lc larg lbody lenv rc v io f r io',
+    let lcnt := Cnt1 lc larg lbody in
+    get_value_atom envV scrut = Some (Left v) ->
+    get_cnt1 envC lc = Some (lcnt, lenv) ->
+    eval (Env.add lenv larg v) empty lbody io f r io' ->
+      eval envV envC (Match scrut lc rc) io (f + 1) r io'
+| eval_match_right : forall envV envC scrut lc rc rarg rbody renv v io f r io',
+    let rcnt := Cnt1 rc rarg rbody in
+    get_value_atom envV scrut = Some (Right v) ->
+    get_cnt1 envC rc = Some (rcnt, renv) ->
+    eval (Env.add renv rarg v) empty rbody io f r io' ->
+      eval envV envC (Match scrut lc rc) io (f + 1) r io'
+| eval_match_err : forall envV envC scrut lc rc io,
+    get_value_atom envV scrut = None ->
+      eval envV envC (Match scrut lc rc) io 1 Rerr io
+| eval_match_err' : forall envV envC scrut lc rc v io,
+    ~ (is_either_val v) ->
+    get_value_atom envV scrut = Some v ->
+      eval envV envC (Match scrut lc rc) io 1 Rerr io
+| eval_match_left_err : forall envV envC scrut lc rc v io,
+    get_value_atom envV scrut = Some (Left v) ->
+    get_cnt1 envC lc = None ->
+      eval envV envC (Match scrut lc rc) io 1 Rerr io
+| eval_match_right_err : forall envV envC scrut lc rc v io,
+    get_value_atom envV scrut = Some (Right v) ->
+    get_cnt1 envC rc = None ->
+      eval envV envC (Match scrut lc rc) io 1 Rerr io
 | eval_halt : forall envV envC a v io,
     get_value_atom envV a = Some v ->
       eval envV envC (Halt a) io 1 (Rhalt v) io
@@ -489,6 +523,40 @@ Proof.
       }
       subst.
       specialize (IHf _ body e empty io A) as [r [io' ?]].
+      eauto with eval.
+  - (* Match *)
+    destruct (get_value_atom envV scrut) eqn:V; try total_ind_solve_error_case.
+    destruct v;
+    try solve [
+      exists Rerr, io;
+      apply (eval_min_fuel' 1); eauto with eval lia; [
+      intro; discriminate H |
+      eapply eval_match_err'; eauto;
+      unfold is_either_val; auto]
+    ].
+    + (* Left *)
+      destruct (get_cnt1 envC lc) eqn:C; try total_ind_solve_error_case.
+      destruct p. destruct c; try solve [
+      unfold get_cnt1 in C; repeat destruct_match; invert C]. 
+      assert (lc = name). {
+        unfold get_cnt1 in C.
+        repeat destruct_match; invert C.
+        apply Nat.eqb_eq; auto.
+      }
+      subst.
+      specialize (IHf _ body (Env.add e arg v) empty io A) as [r [io' ?]].
+      eauto with eval.
+    + (* Right *)
+      destruct (get_cnt1 envC rc) eqn:C; try total_ind_solve_error_case.
+      destruct p. destruct c; try solve [
+      unfold get_cnt1 in C; repeat destruct_match; invert C]. 
+      assert (rc = name). {
+        unfold get_cnt1 in C.
+        repeat destruct_match; invert C.
+        apply Nat.eqb_eq; auto.
+      }
+      subst.
+      specialize (IHf _ body (Env.add e arg v) empty io A) as [r [io' ?]].
       eauto with eval.
   - (* Halt *) 
     destruct (get_value_atom envV a) eqn:V; try total_ind_solve_error_case.
