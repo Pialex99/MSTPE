@@ -4,7 +4,7 @@ From Common Require Export Literal Primitive.
 (* Inductive type : Set := 
 | Int | Bool | Unit 
 | Tuple (tpe1 tpe2: type) 
-| Fun (args: list type) (rettpe: type)
+| Fnt (args: list type) (rettpe: type)
 | Sum (ltpe rtpe : type). *)
 
 (* Record arg : Set := {name: nat;tpe: type}. *)
@@ -14,8 +14,8 @@ Inductive term : Set :=
 | Const (l: literal)
 | Let (x: nat) (t rest : term)
 (* | Let (x: arg) (t rest : term) *)
-(* | LetRec (funs: list function) (rest : term) *)
-| LetRec (f: function) (rest : term)
+(* | LetRec (funs: list fnt) (rest : term) *)
+| LetRec (f: fnt) (rest : term)
 | App (f t : term)
 | In
 | Out (t: term)
@@ -28,5 +28,5 @@ Inductive term : Set :=
 | UpdateRef (ref t: term)
 | ReadRef (ref: term) *)
 with 
-  function : Set := Func (fname: nat) (arg: nat) (body: term).
-  (* function : Set := Func (fname: nat) (args: list arg) (rettpe: type) (body: term). *)
+  fnt : Set := Fnt (fname: nat) (arg: nat) (body: term).
+  (* fnt : Set := Fnt (fname: nat) (args: list arg) (rettpe: type) (body: term). *)

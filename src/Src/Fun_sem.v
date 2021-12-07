@@ -1,13 +1,14 @@
 Require Import Arith Bool List.
 From Utils Require Import Stream Int Env Tactics IO.
 From Src Require Import Tree.
+Require Import FunInd.
 
 Inductive value :=
 | Lit (l: literal)
 | Tuple (v1 v2: value)
 | Left (v: value)
 | Right (v: value)
-| Fun (f: function) (e: env value).
+| Fun (f: fnt) (e: env value).
 
 #[global]
 Hint Constructors value : eval.
@@ -117,119 +118,138 @@ Definition compute_unary_op op v :=
 
 Close Scope Z_scope.
 
+(* Function eval (env : env value) (t : term) (io : IO) (clock : nat) : result * IO * nat :=
+  match t with
+  | Var n => 
+    match lookup env n with 
+    | None => (Rerr, io, clock)
+    | Some v => (Rval v, io, clock)
+    end 
+  | Const l => (Rval (Lit l), io, clock)
+  | Let x t rest => 
+    match eval env t io clock with 
+    | (Rval v, io, clock) => eval (env + (x, v)) rest io clock 
+    | (r, io, clock) => (r, io, clock)
+    end
+  | _ => (Rerr, io, clock)
+  end. *)
+
+Reserved Notation "'{' io1 '|' Γ '}' t '~>(' f ')' '{' r ',' io2 '}'" (at level 70, no associativity).
 Inductive eval : env value -> term -> IO -> nat -> result -> IO -> Prop :=
 | eval_var : forall env n v io,
-    lookup env n = Some v -> 
-      eval env (Var n) io 1 (Rval v) io
+    env ? n = Some v -> 
+      { io | env } Var n ~>(1) { Rval v, io }
 | eval_var_err : forall env n io,
-    lookup env n = None ->
-      eval env (Var n) io 1 Rerr io
+    env ? n = None ->
+      { io | env } Var n ~>(1) { Rerr, io }
 | eval_const : forall env l io,
-      eval env (Const l) io 1 (Rval (Lit l)) io
+      { io | env } Const l ~>(1) { Rval (Lit l), io }
 | eval_let : forall env io n t v f io' t' f' r io'',
-    eval env t io f (Rval v) io' ->
-    eval (Env.add env n v) t' io' f' r io'' ->
-      eval env (Let n t t') io (f + f' + 1) r io''
+    { io | env } t ~>(f) { Rval v, io' } -> 
+    { io' | env + (n, v) } t' ~>(f') { r, io'' } ->
+      { io | env } Let n t t' ~>(f + f' + 1) { r, io'' }
 | eval_let_err : forall env io n t t' f r io',
     ~ (is_val r) ->
-    eval env t io f r io' ->
-      eval env (Let n t t') io (f + 1) r io'
+    { io | env } t ~>(f) { r, io' } ->
+      { io | env } Let n t t' ~>(f + 1) { r, io' }
 | eval_letrec : forall env io fname farg fbody f t io' r,
-    eval (Env.add env fname (Fun (Func fname farg fbody) env)) t io f r io' ->
-      eval env (LetRec (Func fname farg fbody) t) io (f + 1) r io'
+    let fnt := Fnt fname farg fbody in
+    { io | env + (fname, Fun fnt env) } t ~>(f) { r, io' } ->
+      { io | env } LetRec fnt t ~>(f + 1) { r, io' }
 | eval_app : forall env e1 e2 f1 f2 f3 io0 io1 io2 io3 fname farg fbody fenv v r,
-    let f := (Fun (Func fname farg fbody) fenv) in
-    eval env e1 io0 f1 (Rval f) io1 ->
-    eval env e2 io1 f2 (Rval v) io2 ->
-    eval (Env.add (Env.add fenv farg v) fname f) fbody io2 f3 r io3 ->
-      eval env (App e1 e2) io0 (f1 + f2 + f3 + 1) r io3
+    let f := (Fun (Fnt fname farg fbody) fenv) in
+    { io0 | env } e1 ~>(f1) { Rval f, io1 } ->
+    { io1 | env } e2 ~>(f2) { Rval v, io2 } ->
+    { io2 | fenv + (farg, v) + (fname, f) } fbody ~>(f3) { r, io3 } ->
+      { io0 | env } App e1 e2 ~>(f1 + f2 + f3 + 1) { r, io3 }
 | eval_app_err : forall env e1 e2 f io io' r,
     ~ (is_val r) ->
-    eval env e1 io f r io' ->
-      eval env (App e1 e2) io (f + 1) r io'
+    { io | env } e1 ~>(f) { r, io' } ->
+      { io | env } App e1 e2 ~>(f + 1) { r, io' }
 | eval_app_err' : forall env e1 e2 f io io' r,
     is_val r -> ~ (is_fun_val r) ->
-    eval env e1 io f r io' ->
-      eval env (App e1 e2) io (f + 1) Rerr io'
+    { io | env } e1 ~>(f) { r, io' } ->
+      { io | env } App e1 e2 ~>(f + 1) { Rerr, io' }
 | eval_app_err'' : forall env e1 e2 f1 f2 fname farg fbody fenv io0 io1 io2 r,
-    let f := (Fun (Func fname farg fbody) fenv) in
+    let f := (Fun (Fnt fname farg fbody) fenv) in
     ~ (is_val r) ->
-    eval env e1 io0 f1 (Rval f) io1 ->
-    eval env e2 io1 f2 r io2 ->
-      eval env (App e1 e2) io0 (f1 + f2 + 1) r io2
+    { io0 | env } e1 ~>(f1) { Rval f, io1 } ->
+    { io1 | env } e2 ~>(f2) { r, io2} ->
+      { io0 | env } App e1 e2 ~>(f1 + f2 + 1) { r, io2 }
 | eval_in : forall env i is os,
-      eval env In {|input := i::is; output := os|} 1 (Rval (Lit (IntLit i))) {|input := is; output := os|}
+      { {|input := i::is; output := os|} | env } In ~>(1) { Rval (Lit (IntLit i)), {|input := is; output := os|} }
 | eval_in_err : forall env os,
-      eval env In {|input := nil; output := os|} 1 Reoi {|input := nil; output := os|}
+      { {|input := nil; output := os|} | env } In ~>(1) { Reoi, {|input := nil; output := os|} }
 | eval_out : forall env t f io is o os,
-    eval env t io f (Rval (Lit (IntLit o))) {|input := is; output := os|} ->
-      eval env (Out t) io (f + 1) (Rval (Lit UnitLit)) {|input := is; output := o::os|}
+    { io | env } t ~>(f) { Rval (Lit (IntLit o)), {|input := is; output := os|} } ->
+      { io | env } Out t ~>(f + 1) { Rval (Lit UnitLit), {|input := is; output := o::os|} }
 | eval_out_err : forall env t f io r io', 
     ~ (is_val r) -> 
-    eval env t io f r io' ->
-    eval env (Out t) io (f + 1) r io' 
+    { io | env } t ~>(f) { r, io' } ->
+      { io | env } Out t ~>(f + 1) { r, io' }
 | eval_out_err' : forall env t f io r io',
     is_val r -> ~ (is_int_val r) -> 
-    eval env t io f r io' ->
-      eval env (Out t) io (f + 1) Rerr io'
+    { io | env } t ~>(f) { r, io' } ->
+      { io | env } Out t ~>(f + 1) { Rerr, io' }
 | eval_ite_true : forall env cond thent elset f f' io io' r io'',
-    eval env cond io f (Rval (Lit (BoolLit true))) io' ->
-    eval env thent io' f' r io'' ->
-      eval env (Ite cond thent elset) io (f + f' + 1) r io''
+    { io | env } cond ~>(f) { Rval (Lit (BoolLit true)), io' } -> 
+    { io' | env } thent ~>(f') { r, io'' } ->
+      { io | env } Ite cond thent elset ~>(f + f' + 1) { r, io'' }
 | eval_ite_false : forall env cond thent elset f f' io io' r io'',
-    eval env cond io f (Rval (Lit (BoolLit false))) io' ->
-    eval env elset io' f' r io'' ->
-      eval env (Ite cond thent elset) io (f + f' + 1) r io''
+    { io | env } cond ~>(f) { Rval (Lit (BoolLit false)),  io' } ->
+    { io' | env } elset ~>(f') { r, io'' } ->
+      { io | env } Ite cond thent elset ~>(f + f' + 1) { r, io'' }
 | eval_ite_err : forall env cond thent elset f io r io',
     ~ (is_val r) ->
-    eval env cond io f r io' ->
-      eval env (Ite cond thent elset) io (f + 1) r io'
+    { io | env } cond ~>(f) { r, io' } ->
+      { io | env } Ite cond thent elset ~>(f + 1) { r, io' }
 | eval_ite_err' : forall env cond thent elset f io r io',
     is_val r -> ~ (is_bool_val r) ->
-    eval env cond io f r io' ->
-      eval env (Ite cond thent elset) io (f + 1) Rerr io'
+    { io | env } cond ~>(f) { r, io' } ->
+      { io | env } Ite cond thent elset ~>(f + 1) { Rerr, io' }
 | eval_match_left : forall env scrut n lt rcase v f io io' f' r io'',
-    eval env scrut io f (Rval (Left v)) io' ->
-    eval (Env.add env n v) lt io' f' r io'' ->
-      eval env (Match scrut (n, lt) rcase) io (f + f' + 1) r io'' 
+    { io | env } scrut ~>(f) { Rval (Left v), io' } ->
+    { io' | env + (n, v) } lt ~>(f') { r, io'' } ->
+      { io | env } Match scrut (n, lt) rcase ~>(f + f' + 1) { r, io'' }
 | eval_match_right : forall env scrut n lcase rt v f io io' f' r io'',
-    eval env scrut io f (Rval (Right v)) io' ->
-    eval (Env.add env n v) rt io' f' r io'' ->
-      eval env (Match scrut lcase (n, rt)) io (f + f' + 1) r io'' 
+    { io | env } scrut ~>(f) { Rval (Right v), io' } ->
+    { io' | env + (n, v) } rt ~>(f') { r, io'' } ->
+      { io | env } Match scrut lcase (n, rt) ~>(f + f' + 1) { r, io'' }
 | eval_match_err : forall env scrut lcase rcase f r io io',
     ~ (is_val r) ->
-    eval env scrut io f r io' ->
-      eval env (Match scrut lcase rcase) io (f + 1) r io' 
+    { io | env } scrut ~>(f) { r, io' } ->
+      { io | env } Match scrut lcase rcase ~>(f + 1) { r, io' }
 | eval_match_err' : forall env scrut lcase rcase f r io io',
     is_val r -> ~ (is_either_val r) ->
-    eval env scrut io f r io' ->
-      eval env (Match scrut lcase rcase) io (f + 1) Rerr io' 
-| eval_binop : forall env op t1 t2 v1 v2 f f' io io' io'',
-    eval env t1 io f (Rval v1) io' ->
-    eval env t2 io' f' (Rval v2) io'' ->
-      eval env (BinaryOp op t1 t2) io (f + f' + 1) (compute_binary_op op v1 v2) io'' 
-| eval_binop_err : forall env op t1 t2 r1 f io io',
+    { io | env } scrut ~>(f) { r, io' } ->
+      { io | env } Match scrut lcase rcase ~>(f + 1) { Rerr, io' }
+| eval_binop : forall env op t1 t2 v1 v2 f1 f2 io io' io'',
+    { io | env } t1 ~>(f1) { Rval v1, io' } ->
+    { io' | env } t2 ~>(f2) { Rval v2, io'' } ->
+      { io | env } BinaryOp op t1 t2 ~>(f1 + f2 + 1) { compute_binary_op op v1 v2, io'' }
+| eval_binop_err : forall env op t1 t2 r1 f1 io io',
     ~ (is_val r1) -> 
-    eval env t1 io f r1 io' ->
-      eval env (BinaryOp op t1 t2) io (f + 1) r1 io' 
-| eval_binop_err' : forall env op t1 t2 v1 r2 f f' io io' io'',
-    eval env t1 io f (Rval v1) io' ->
+    { io | env } t1 ~>(f1) { r1, io' } ->
+      { io | env } BinaryOp op t1 t2 ~>(f1 + 1) { r1, io' }
+| eval_binop_err' : forall env op t1 t2 v1 r2 f1 f2 io io' io'',
+    { io | env } t1 ~>(f1) { Rval v1, io' } ->
     ~ (is_val r2) -> 
-    eval env t2 io' f' r2 io'' ->
-      eval env (BinaryOp op t1 t2) io (f + f' + 1) r2 io''
+    { io' | env } t2 ~>(f2) { r2, io'' } ->
+      { io | env } BinaryOp op t1 t2 ~>(f1 + f2 + 1) { r2, io'' }
 | eval_unary : forall env op t v f io io',
-    eval env t io f (Rval v) io' ->
-      eval env (UnaryOp op t) io (f + 1) (compute_unary_op op v) io'
+    { io | env } t ~>(f) { Rval v, io' } -> 
+      { io | env } UnaryOp op t ~>(f + 1) { compute_unary_op op v, io' }
 | eval_unary_err : forall env op t r f io io',
     ~ (is_val r) ->
-    eval env t io f r io' ->
-      eval env (UnaryOp op t) io (f + 1) r io'
+    { io | env } t ~>(f) { r, io' } ->
+      { io | env } UnaryOp op t ~>(f + 1) { r, io' }
 | eval_timeout : forall env t io,
-    eval env t io 0 Rtimeout io
+    { io | env } t ~>(0) { Rtimeout, io }
 | eval_extra_fuel : forall env t f io io' r,
     ~ (is_timeout r) ->
-    eval env t io f r io' ->
-      eval env t io (f + 1) r io'.
+    { io | env } t ~>(f) { r, io' } ->
+      { io | env } t ~>(f + 1) { r, io' }
+where "'{' io1 '|' Γ '}' t '~>(' f ')' '{' r ',' io2 '}'" := (eval Γ t io1 f r io2).
 
 #[global]
 Hint Constructors eval : eval.
@@ -324,7 +344,7 @@ Lemma eval_min_fuel: forall t env io f r io',
     exists io'', eval env t io f' Rtimeout io'').
 Proof.
   intros t env io f r io' HR;
-  induction 1;
+  induction 1; subst_all;
   repeat instantiate_eval_min_fuel_IH;
   try solve [
     find_min_fuel; intros;
@@ -409,7 +429,7 @@ Proof.
     instantiate_eval_total_ind_IH env t0_1 io f'.
     destruct v;
     try solve [
-      (* Solve not function cases *)
+      (* Solve not Fnttion cases *)
       exists Rerr, io0;
       eapply eval_app_err'; eauto with eval; 
       autounfold with eval; auto
@@ -418,7 +438,7 @@ Proof.
     instantiate_eval_min_fuel t0_1.
     instantiate_eval_total_ind_IH env t0_2 io0 f'0.
     instantiate_eval_min_fuel t0_2.
-    instantiate_eval_total_ind_IH (Env.add (Env.add e arg v) fname (Fun (Func fname arg body) e)) body io1 f'1.
+    instantiate_eval_total_ind_IH (Env.add (Env.add e arg v) fname (Fun (Fnt fname arg body) e)) body io1 f'1.
   - (* In *)  
     destruct io eqn:E.
     destruct input; 

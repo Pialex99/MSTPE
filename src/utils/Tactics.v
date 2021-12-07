@@ -5,6 +5,12 @@ Hint Extern 50 => lia: lia.
 #[global]
 Hint Extern 50 => exfalso: exfalso.
 
+Ltac subst_all := 
+  repeat lazymatch goal with 
+  | s := _ |- _ =>
+    subst s
+  end.
+
 Ltac destruct_exist_H :=
   match goal with 
   | H: exists _, _ |- _ => 
@@ -100,7 +106,7 @@ Ltac simpl_lia :=
   end.
 
 Ltac reduce :=
-  intros || (cbn in *) || subst 
+  intros || (cbn in *) || subst || subst_all
   || intuition congruence 
   || destruct_exist_H || destruct_and_H
   || autounfold with *.

@@ -115,161 +115,163 @@ Definition get_cnt1 (env : env (cnt * env value)) c :=
   | _ => None
   end.
 
+Reserved Notation "'{' io1 '|' '(' Γᵥ ',' Γᵨ ')' '}' t '~>(' f ')' '{' r ',' io2 '}'" (at level 70, no associativity).
 Inductive eval : env value -> env (cnt * (env value)) -> term -> IO -> nat -> result -> IO -> Prop :=
 | eval_letB : forall envV envC n op a1 a2 rest io f v r io',
     binary_op_atom envV op a1 a2 = Some v ->
-    eval (Env.add envV n v) envC rest io f r io' ->
-      eval envV envC (LetB n op a1 a2 rest) io (f + 1) r io'
+    { io | (envV + (n, v), envC) } rest ~>(f) { r, io' } ->
+      { io | (envV, envC) } LetB n op a1 a2 rest ~>(f + 1) { r, io' }
 | eval_letB_err : forall envV envC n op a1 a2 rest io,
     binary_op_atom envV op a1 a2 = None ->
-      eval envV envC (LetB n op a1 a2 rest) io 1 Rerr io
+      { io | (envV, envC) } LetB n op a1 a2 rest ~>(1) { Rerr, io }
 | eval_letU : forall envV envC n op a rest io f v r io',
     unary_op_atom envV op a = Some v ->
-    eval (Env.add envV n v) envC rest io f r io' ->
-      eval envV envC (LetU n op a rest) io (f + 1) r io'
+    { io | (envV + (n, v), envC) } rest ~>(f) { r, io' } ->
+      { io | (envV, envC) } LetU n op a rest ~>(f + 1) { r, io' }
 | eval_letU_err : forall envV envC n op a rest io,
     unary_op_atom envV op a = None ->
-      eval envV envC (LetU n op a rest) io 1 Rerr io
+      { io | (envV, envC) } LetU n op a rest ~>(1) { Rerr, io }
 | eval_letC0 : forall envV envC cname cbody rest io f r io',
     let cnt := Cnt0 cname cbody in 
-    eval envV (Env.add envC cname (cnt, envV)) rest io f r io' ->
-      eval envV envC (LetC cnt rest) io (f + 1) r io' 
+    { io | (envV, envC + (cname, (cnt, envV))) } rest ~>(f) { r, io' } ->
+      { io | (envV, envC) } LetC cnt rest ~>(f + 1) { r, io' }
 | eval_letC1 : forall envV envC cname carg cbody rest io f r io',
     let cnt := Cnt1 cname carg cbody in 
-    eval envV (Env.add envC cname (cnt, envV)) rest io f r io' ->
-      eval envV envC (LetC cnt rest) io (f + 1) r io' 
+    { io | (envV, envC + (cname, (cnt, envV))) } rest ~>(f) { r, io' } ->
+      { io | (envV, envC)} LetC cnt rest ~>(f + 1) { r, io' }
 | eval_letF : forall envV envC fname fretC farg fbody rest io f r io',
     let fnt := Fnt fname fretC farg fbody in
-    eval (Env.add envV fname (Fun fnt envV)) envC rest io f r io' ->
-      eval envV envC (LetF fnt rest) io (f + 1) r io' 
+    { io | (envV + (fname, Fun fnt envV), envC) } rest ~>(f) { r, io' } ->
+      { io | (envV, envC) } LetF fnt rest ~>(f + 1) { r, io' }
 | eval_letIn : forall envV envC n rest i is os f r io',
-    eval (Env.add envV n (Lit (IntLit i))) envC rest {|input:=is;output:=os|} f r io' ->
-      eval envV envC (LetIn n rest) {|input:=i::is;output:=os|} (f + 1) r io'
+    { {|input:=is;output:=os|} | (envV + (n, Lit (IntLit i)), envC) } rest ~>(f) { r, io' } ->
+      { {|input:=i::is;output:=os|} | (envV, envC) } LetIn n rest ~>(f + 1) { r, io' }
 | eval_letIn_err : forall envV envC n rest os,
     let io := {|input:=nil;output:=os|} in
-      eval envV envC (LetIn n rest) io 1 Reoi io
+      { io | (envV, envC) } LetIn n rest ~>(1) { Reoi, io }
 | eval_letOut : forall envV envC n a rest is os f r io' o,
     get_value_atom envV a = Some (Lit (IntLit o)) -> 
-    eval (Env.add envV n (Lit UnitLit)) envC rest {|input:=is;output:=o::os|} f r io' ->
-      eval envV envC (LetOut n a rest) {|input:=is;output:=os|} (f + 1) r io'
+    { {|input:=is;output:=o::os|} | (envV + (n, Lit UnitLit), envC) } rest ~>(f) { r, io' } ->
+      {  {|input:=is;output:=os|} | (envV, envC) } LetOut n a rest ~>(f + 1) { r, io' }
 | eval_letOut_err : forall envV envC n a rest io,
     get_value_atom envV a = None ->
-      eval envV envC (LetOut n a rest) io 1 Rerr io
+      { io | (envV, envC) } LetOut n a rest ~>(1) { Rerr, io }
 | eval_letOut_err' : forall envV envC n a rest io v,
     ~ (is_int_val v) ->
     get_value_atom envV a = Some v ->
-      eval envV envC (LetOut n a rest) io 1 Rerr io
+      { io | (envV, envC) } LetOut n a rest ~>(1) { Rerr, io }
 | eval_AppC0 : forall envV envC c cbody envV' io f r io',
     get_cnt0 envC c = Some (Cnt0 c cbody, envV') ->
-    eval envV' empty cbody io f r io' ->
-      eval envV envC (AppC0 c) io (f + 1) r io'
+    { io | (envV', empty) } cbody ~>(f) { r, io' } ->
+      { io | (envV, envC) } AppC0 c ~>(f + 1) { r, io' }
 | eval_AppC0_err : forall envV envC c io,
     get_cnt0 envC c = None ->
-      eval envV envC (AppC0 c) io 1 Rerr io
+      { io | (envV, envC) } AppC0 c ~>(1) { Rerr, io }
 | eval_AppC1 : forall envV envC c a v cbody carg envV' io f r io',
     get_cnt1 envC c = Some (Cnt1 c carg cbody, envV') ->
     get_value_atom envV a = Some v ->
-    eval (Env.add envV' carg v) empty cbody io f r io' ->
-      eval envV envC (AppC1 c a) io (f + 1) r io'
+    { io | (envV' + (carg, v), empty) } cbody ~>(f) { r, io' } ->
+      { io | (envV, envC) } AppC1 c a ~>(f + 1) { r, io' }
 | eval_AppC1_err : forall envV envC c a io,
     get_cnt1 envC c = None ->
-      eval envV envC (AppC1 c a) io 1 Rerr io
+      { io | (envV, envC) } AppC1 c a ~>(1) { Rerr, io }
 | eval_AppC1_err' : forall envV envC c a cbody carg envV' io,
     get_cnt1 envC c = Some (Cnt1 c carg cbody, envV') ->
     get_value_atom envV a = None ->
-      eval envV envC (AppC1 c a) io 1 Rerr io
+      { io | (envV, envC) } AppC1 c a ~>(1) { Rerr, io }
 | eval_AppF : forall envV envC af fname fretC farg fbody fenv c carg cbody cenv a v io f r io',
     let fnt := Fnt fname fretC farg fbody in
     let cnt := Cnt1 c carg cbody in
     get_value_atom envV af = Some (Fun fnt fenv) ->
     get_value_atom envV a = Some v ->
     get_cnt1 envC c = Some (cnt, cenv) ->
-    eval (Env.add (Env.add fenv fname (Fun fnt fenv)) farg v) (Env.add empty fretC (cnt, cenv)) fbody io f r io' ->
-      eval envV envC (AppF af c a) io (f + 1) r io'
+    { io | (fenv + (fname, Fun fnt fenv) + (farg, v), empty + (fretC, (cnt, cenv))) } fbody ~>(f) { r, io' } ->
+      { io | (envV, envC) } AppF af c a ~>(f + 1) { r, io' }
 | eval_AppF_err : forall envV envC af c a io,
     get_value_atom envV af = None ->
-      eval envV envC (AppF af c a) io 1 Rerr io
+      { io | (envV, envC) } AppF af c a ~>(1) { Rerr, io }
 | eval_AppF_err' : forall envV envC af c a io v,
     ~ (is_fun_val v) -> 
     get_value_atom envV af = Some v ->
-      eval envV envC (AppF af c a) io 1 Rerr io
+      { io | (envV, envC) } AppF af c a ~>(1) { Rerr, io }
 | eval_AppF_err'' : forall envV envC af c a io fname fretC farg fbody fenv,
     let fnt := Fnt fname fretC farg fbody in
     get_value_atom envV af = Some (Fun fnt fenv) ->
     get_value_atom envV a = None ->
-      eval envV envC (AppF af c a) io 1 Rerr io
+      { io | (envV, envC) } AppF af c a ~>(1) { Rerr, io }
 | eval_AppF_err''' : forall envV envC af c a io fname fretC farg fbody fenv v,
     let fnt := Fnt fname fretC farg fbody in
     get_value_atom envV af = Some (Fun fnt fenv) ->
     get_value_atom envV a = Some v ->
     get_cnt1 envC c = None ->
-      eval envV envC (AppF af c a) io 1 Rerr io
+      { io | (envV, envC) } AppF af c a ~>(1) { Rerr, io }
 | eval_Ite_true : forall envV envC c thenC elseC cbody cenv io f r io',
     let cnt := Cnt0 thenC cbody in 
     get_value_atom envV c = Some (Lit (BoolLit true)) ->
     get_cnt0 envC thenC = Some (cnt, cenv) ->
-    eval cenv empty cbody io f r io' ->
-      eval envV envC (Ite c thenC elseC) io (f + 1) r io'
+    { io | (cenv, empty) } cbody ~>(f) { r, io' } ->
+      { io | (envV, envC) } Ite c thenC elseC ~>(f + 1) { r, io' }
 | eval_Ite_true_err : forall envV envC c thenC elseC io,
     get_value_atom envV c = Some (Lit (BoolLit true)) ->
     get_cnt0 envC thenC = None ->
-      eval envV envC (Ite c thenC elseC) io 1 Rerr io
+      { io | (envV, envC) } Ite c thenC elseC ~>(1) { Rerr, io }
 | eval_Ite_false : forall envV envC c thenC elseC cbody cenv io f r io',
     let cnt := Cnt0 elseC cbody in 
     get_value_atom envV c = Some (Lit (BoolLit false)) ->
     get_cnt0 envC elseC = Some (cnt, cenv) ->
-    eval cenv empty cbody io f r io' ->
-      eval envV envC (Ite c thenC elseC) io (f + 1) r io'
+    { io | (cenv, empty) } cbody ~>(f) { r, io' } ->
+      { io | (envV, envC) } Ite c thenC elseC ~>(f + 1) { r, io' }
 | eval_Ite_false_err : forall envV envC c thenC elseC io,
     get_value_atom envV c = Some (Lit (BoolLit false)) ->
     get_cnt0 envC elseC = None ->
-      eval envV envC (Ite c thenC elseC) io 1 Rerr io
+      { io | (envV, envC) } Ite c thenC elseC ~>(1) { Rerr, io }
 | eval_Ite_err : forall envV envC c thenC elseC io,
     get_value_atom envV c = None ->
-      eval envV envC (Ite c thenC elseC) io 1 Rerr io
+      { io | (envV, envC) } Ite c thenC elseC ~>(1) { Rerr, io }
 | eval_Ite_err' : forall envV envC c thenC elseC io v,
     ~ (is_bool_val v) ->
     get_value_atom envV c = Some v ->
-      eval envV envC (Ite c thenC elseC) io 1 Rerr io
+      { io | (envV, envC) } Ite c thenC elseC ~>(1) { Rerr, io }
 | eval_match_left : forall envV envC scrut lc larg lbody lenv rc v io f r io',
     let lcnt := Cnt1 lc larg lbody in
     get_value_atom envV scrut = Some (Left v) ->
     get_cnt1 envC lc = Some (lcnt, lenv) ->
-    eval (Env.add lenv larg v) empty lbody io f r io' ->
-      eval envV envC (Match scrut lc rc) io (f + 1) r io'
+    { io | (lenv + (larg, v), empty) } lbody ~>(f) { r, io' } ->
+      { io | (envV, envC) } Match scrut lc rc ~>(f + 1) { r, io' }
 | eval_match_right : forall envV envC scrut lc rc rarg rbody renv v io f r io',
     let rcnt := Cnt1 rc rarg rbody in
     get_value_atom envV scrut = Some (Right v) ->
     get_cnt1 envC rc = Some (rcnt, renv) ->
-    eval (Env.add renv rarg v) empty rbody io f r io' ->
-      eval envV envC (Match scrut lc rc) io (f + 1) r io'
+    { io | (renv + (rarg, v), empty) } rbody ~>(f) { r, io' } ->
+      { io | (envV, envC) } Match scrut lc rc ~>(f + 1) { r, io' }
 | eval_match_err : forall envV envC scrut lc rc io,
     get_value_atom envV scrut = None ->
-      eval envV envC (Match scrut lc rc) io 1 Rerr io
+      { io | (envV, envC) } Match scrut lc rc ~>(1) { Rerr, io }
 | eval_match_err' : forall envV envC scrut lc rc v io,
     ~ (is_either_val v) ->
     get_value_atom envV scrut = Some v ->
-      eval envV envC (Match scrut lc rc) io 1 Rerr io
+      { io | (envV, envC) } Match scrut lc rc ~>(1) { Rerr, io }
 | eval_match_left_err : forall envV envC scrut lc rc v io,
     get_value_atom envV scrut = Some (Left v) ->
     get_cnt1 envC lc = None ->
-      eval envV envC (Match scrut lc rc) io 1 Rerr io
+      { io | (envV, envC) } Match scrut lc rc ~>(1) { Rerr, io }
 | eval_match_right_err : forall envV envC scrut lc rc v io,
     get_value_atom envV scrut = Some (Right v) ->
     get_cnt1 envC rc = None ->
-      eval envV envC (Match scrut lc rc) io 1 Rerr io
+      { io | (envV, envC) } Match scrut lc rc ~>(1) { Rerr, io }
 | eval_halt : forall envV envC a v io,
     get_value_atom envV a = Some v ->
-      eval envV envC (Halt a) io 1 (Rhalt v) io
+      { io | (envV, envC) } Halt a ~>(1) { Rhalt v, io }
 | eval_halt_err : forall envV envC a io,
     get_value_atom envV a = None ->
-      eval envV envC (Halt a) io 1 Rerr io
+      { io | (envV, envC) } Halt a ~>(1) { Rerr, io }
 | eval_timeout : forall envV envC t io,
-      eval envV envC t io 0 Rtimeout io
+      { io | (envV, envC) } t ~>(0) { Rtimeout, io }
 | eval_extra_fuel : forall envV envC t io f r io',
     r <> Rtimeout ->
-    eval envV envC t io f r io' ->
-      eval envV envC t io (f + 1) r io'.
+    { io | (envV, envC) } t ~>(f) { r, io' } ->
+      { io | (envV, envC) } t ~>(f + 1) { r, io' }
+where "'{' io1 '|' '(' Γᵥ ',' Γᵨ ')' '}' t '~>(' f ')' '{' r ',' io2 '}'" := (eval Γᵥ Γᵨ t io1 f r io2).
 
 #[global]
 Hint Constructors eval : eval.
@@ -374,7 +376,7 @@ Ltac total_ind_solve_error_case :=
   end.
 
 Lemma eval_total_ind: forall f f' t envV envC io, f' < f -> exists r io',
-  eval envV envC t io f' r io'.
+  { io | (envV, envC) } t ~>(f') { r, io' }.
 Proof.
   induction f; try lia.
   destruct t0; intros;
@@ -563,4 +565,10 @@ Proof.
     exists (Rhalt v), io.
     eapply (eval_min_fuel' 1); eauto with eval lia.
     intro H; discriminate H.
+Qed.
+
+Theorem eval_total : forall f t envV envC io, exists r io',
+  { io | (envV, envC) } t ~>(f) { r, io' }.
+Proof.
+  eauto using eval_total_ind.
 Qed.
