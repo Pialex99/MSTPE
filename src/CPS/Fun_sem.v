@@ -1,6 +1,10 @@
 Require Import Arith Bool List.
 From Utils Require Import Int Env Tactics IO.
 From CPS Require Import Tree.
+Require Import FunInd Recdef.
+
+(* Declare Scope cps_scope.
+Open Scope cps_scope. *)
 
 Inductive value :=
 | Lit (l: literal)
@@ -18,7 +22,7 @@ Fixpoint value_eqb (v1 v2 : value) :=
   | _, _ => false
   end.
 
-Definition is_int_val v := 
+(* Definition is_int_val v := 
   match v with
   | Lit (IntLit _) => True 
   | _ => False
@@ -41,13 +45,12 @@ Definition is_either_val v :=
   | Left _ => True 
   | Right _ => True 
   | _ => False 
-  end.
+  end. *)
 
 Inductive result :=
 | Rhalt (v: value) (* End of program *)
 | Rerr (* Type error *)
 | Reoi (* End of Input *)
-(* | Rhalt (n: int) (* End of program with Halt *) *)
 | Rtimeout. (* Clock reached 0 *)
 
 Open Scope Z_scope.
@@ -105,17 +108,113 @@ Definition unary_op_atom env op a :=
 
 Definition get_cnt0 (env : env (cnt * env value)) c := 
   match lookup env c with
-  | Some (Cnt0 c' body, env') => if c =? c' then Some (Cnt0 c' body, env') else None 
+  | Some (Cnt0 _ body, env') => Some (Cnt0 c body, env')
   | _ => None
   end.
 
 Definition get_cnt1 (env : env (cnt * env value)) c := 
   match lookup env c with
-  | Some (Cnt1 c' arg body, env') => if c =? c' then Some (Cnt1 c' arg body, env') else None 
+  | Some (Cnt1 _ arg body, env') => Some (Cnt1 c arg body, env') 
   | _ => None
   end.
 
-Reserved Notation "'{' io1 '|' '(' Γᵥ ',' Γᵨ ')' '}' t '~>(' f ')' '{' r ',' io2 '}'" (at level 70, no associativity).
+Function evalₜ (fuel : nat) (envV : env value) (envC : env (cnt * (env value))) (t : term) (io : IO) : result * IO := 
+  match fuel with
+  | 0 => (Rtimeout, io)
+  | S fuel => 
+      match t with
+      | LetB n op a1 a2 r => 
+          match binary_op_atom envV op a1 a2 with 
+          | Some v => evalₜ fuel (envV + (n, v)) envC r io 
+          | _ => (Rerr, io)
+          end 
+      | LetU n op a r => 
+          match unary_op_atom envV op a with 
+          | Some v => evalₜ fuel (envV + (n, v)) envC r io
+          | _ => (Rerr, io)
+          end 
+      | LetC (Cnt0 n b) r => 
+          let c := Cnt0 n b in 
+          evalₜ fuel envV (envC + (n, (c, envV))) r io 
+      | LetC (Cnt1 n a b) r => 
+          let c := Cnt1 n a b in 
+          evalₜ fuel envV (envC + (n, (c, envV))) r io
+      | LetF (Fnt fname retC farg fbody) r => 
+          let f := Fnt fname retC farg fbody in 
+          evalₜ fuel (envV + (fname, Fun f envV)) envC r io 
+      | LetIn n r => 
+          match get_input io with
+          | Some (i, io) => evalₜ fuel (envV + (n, Lit (IntLit i))) envC r io
+          | _ => (Reoi, io)
+          end 
+      | LetOut n a r => 
+          match get_value_atom envV a with 
+          | Some (Lit (IntLit o)) => evalₜ fuel (envV + (n, Lit UnitLit)) envC r (outputs io o)
+          | _ => (Rerr, io)
+          end
+      | AppC0 n => 
+          match get_cnt0 envC n with 
+          | Some (Cnt0 _ b, envV) => evalₜ fuel envV empty b io 
+          | _ => (Rerr, io)
+          end 
+      | AppC1 n a => 
+          match get_cnt1 envC n with 
+          | Some (Cnt1 _ carg b, envV) => 
+              match get_value_atom envV a with 
+              | Some v => evalₜ fuel (envV + (carg, v)) empty b io 
+              | _ => (Rerr, io)
+              end
+          | _ => (Rerr, io)
+          end
+      | AppF f c a => 
+          match get_value_atom envV a with
+          | Some (Fun (Fnt fname retC farg fbody) fenv) => 
+              let f := Fnt fname retC farg fbody in
+              match get_cnt1 envC c with
+              | Some (Cnt1 _ carg cbody, cenv) => 
+                  let cnt := Cnt1 c carg cbody in 
+                  match get_value_atom envV a with
+                  | Some v => 
+                      evalₜ fuel (fenv + (fname, Fun f fenv) + (farg, v)) (empty + (c, (cnt, cenv))) fbody io
+                  | _ => (Rerr, io)
+                  end 
+              | _ => (Rerr, io)
+              end 
+          | _ => (Rerr, io)
+          end
+      | Ite c t e => 
+          match get_value_atom envV c with
+          | Some (Lit (BoolLit true)) => 
+              evalₜ fuel envV envC (AppC0 t) io 
+          | Some (Lit (BoolLit false)) => 
+              evalₜ fuel envV envC (AppC0 e) io 
+          | _ => (Rerr, io)
+          end 
+      | Match s lc rc => 
+          match get_value_atom envV s with 
+          | Some (Left v) => 
+              match get_cnt1 envC lc with 
+              | Some (Cnt1 _ carg b, envV) => 
+                  evalₜ fuel (envV + (carg, v)) empty b io 
+              | _ => (Rerr, io)
+              end
+          | Some (Right v) => 
+              match get_cnt1 envC rc with 
+              | Some (Cnt1 _ carg b, envV) => 
+                  evalₜ fuel (envV + (carg, v)) empty b io 
+              | _ => (Rerr, io)
+              end 
+          | _ => (Rerr, io)
+          end 
+      | Halt a => 
+          match get_value_atom envV a with 
+          | Some v => (Rhalt v, io)
+          | _ => (Rerr, io)
+          end
+      end
+  end.
+          
+(* Reserved Notation "'{' io1 '|' '(' Γᵥ ',' Γᵨ ')' '}' t '~>(' f ')' '{' r ',' io2 '}'" (at level 70, no associativity).
 Inductive eval : env value -> env (cnt * (env value)) -> term -> IO -> nat -> result -> IO -> Prop :=
 | eval_letB : forall envV envC n op a1 a2 rest io f v r io',
     binary_op_atom envV op a1 a2 = Some v ->
@@ -271,7 +370,7 @@ Inductive eval : env value -> env (cnt * (env value)) -> term -> IO -> nat -> re
     r <> Rtimeout ->
     { io | (envV, envC) } t ~>(f) { r, io' } ->
       { io | (envV, envC) } t ~>(f + 1) { r, io' }
-where "'{' io1 '|' '(' Γᵥ ',' Γᵨ ')' '}' t '~>(' f ')' '{' r ',' io2 '}'" := (eval Γᵥ Γᵨ t io1 f r io2).
+where "'{' io1 '|' '(' Γᵥ ',' Γᵨ ')' '}' t '~>(' f ')' '{' r ',' io2 '}'" := (eval Γᵥ Γᵨ t io1 f r io2) : cps_scope.
 
 #[global]
 Hint Constructors eval : eval.
@@ -572,3 +671,10 @@ Theorem eval_total : forall f t envV envC io, exists r io',
 Proof.
   eauto using eval_total_ind.
 Qed.
+
+Lemma eval_eoi: forall io envV envC t f io' r, r = Reoi ->
+  { io | (envV, envC) } t ~>(f) { r, io' } ->
+    input io' = nil.
+Proof.
+  induction 2; auto; discriminate H.
+Qed. *)

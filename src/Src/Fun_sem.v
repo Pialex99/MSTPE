@@ -26,7 +26,7 @@ Fixpoint next_freeᵥ (v : value) : nat :=
         | (n, v) :: env => 
             Peano.max (S n) (Peano.max (next_freeᵥ v) (next_free_env env))
         end in 
-      Peano.max (S fname) (Peano.max (S farg) (Peano.max (next_free fbody) (next_free_env env)))
+      Peano.max (S fname) (Peano.max (S farg) (Peano.max (next_freeₜ fbody) (next_free_env env)))
   end.
 
 Fixpoint next_free_env env := 

@@ -1,6 +1,13 @@
 From Utils Require Import Int.
 
-Record IO := {input : list int; output : list int}.
+Open Scope list_scope.
 
-Definition outputs io o := 
-  {|input:= input io; output:= o::output io|}.
+Record IO := mk_io {input : list int; output : list int}.
+
+Definition outputs io o := mk_io (input io) (o::output io).
+
+Definition get_input io := 
+  match input io with
+  | nil => None 
+  | i :: input => Some (i, mk_io input (output io))
+  end.

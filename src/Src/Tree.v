@@ -34,15 +34,15 @@ Fixpoint next_freeₜ (t : term) : nat :=
   match t with 
   | Var n => S n 
   | Const _ => 0
-  | Let x t r => max (next_free t) (max (next_free r) (S x))
+  | Let x t r => max (next_freeₜ t) (max (next_freeₜ r) (S x))
   | LetRec (Fnt n a b) r => 
-      max (S n) (max (S a) (max (next_free b) (next_free r)))
-  | App f t => max (next_free f) (next_free t)
+      max (S n) (max (S a) (max (next_freeₜ b) (next_freeₜ r)))
+  | App f t => max (next_freeₜ f) (next_freeₜ t)
   | In => 0 
-  | Out t => next_free t
-  | Ite c t e => max (next_free c) (max (next_free t) (next_free e))
-  | BinaryOp _ t1 t2 => max (next_free t1) (next_free t2)
-  | UnaryOp _ t => next_free t 
+  | Out t => next_freeₜ t
+  | Ite c t e => max (next_freeₜ c) (max (next_freeₜ t) (next_freeₜ e))
+  | BinaryOp _ t1 t2 => max (next_freeₜ t1) (next_freeₜ t2)
+  | UnaryOp _ t => next_freeₜ t 
   | Match s (ln, lt) (rn, rt) => 
-      max (next_free s) (max (S ln) (max (next_free lt) (max (S rn) (next_free rt))))
+      max (next_freeₜ s) (max (S ln) (max (next_freeₜ lt) (max (S rn) (next_freeₜ rt))))
   end.
