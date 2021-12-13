@@ -1,7 +1,7 @@
 Require Import Arith Bool List.
-From Utils Require Import Stream Int Env Tactics IO.
+From Utils Require Import Int Env Tactics IO.
 From Src Require Import Tree.
-Require Import FunInd.
+Require Import FunInd Recdef.
 
 Inductive value :=
 | Lit (l: literal)
@@ -12,6 +12,29 @@ Inductive value :=
 
 #[global]
 Hint Constructors value : eval.
+
+Fixpoint next_freeᵥ (v : value) : nat := 
+  match v with 
+  | Lit _ => 0
+  | Tuple v1 v2 => Peano.max (next_freeᵥ v1) (next_freeᵥ v2)
+  | Left v => next_freeᵥ v 
+  | Right v => next_freeᵥ v
+  | Fun (Fnt fname farg fbody) env => 
+      let fix next_free_env env := 
+        match env with 
+        | nil => 0 
+        | (n, v) :: env => 
+            Peano.max (S n) (Peano.max (next_freeᵥ v) (next_free_env env))
+        end in 
+      Peano.max (S fname) (Peano.max (S farg) (Peano.max (next_free fbody) (next_free_env env)))
+  end.
+
+Fixpoint next_free_env env := 
+  match env with 
+  | nil => 0 
+  | (n, v) :: env => 
+      Peano.max (S n) (Peano.max (next_freeᵥ v) (next_free_env env))
+  end.
 
 Fixpoint value_eqb (v1 v2 : value) :=
   match v1, v2 with 
@@ -29,7 +52,7 @@ Inductive result :=
 (* | Rhalt (n: int) (* End of program with Halt *) *)
 | Rtimeout. (* Clock reached 0 *)
 
-Definition is_timeout r := 
+(* Definition is_timeout r := 
   match r with
   | Rtimeout => True
   | _ => False
@@ -67,7 +90,7 @@ Definition is_fun_val r :=
   end.
 
 #[global]
-Hint Unfold is_val is_int_val is_bool_val is_either_val is_fun_val is_timeout : eval.
+Hint Unfold is_val is_int_val is_bool_val is_either_val is_fun_val is_timeout : eval. *)
 
 (* Record state := mk_state {env: env value; input: list int; output: list int}.
 
@@ -118,23 +141,82 @@ Definition compute_unary_op op v :=
 
 Close Scope Z_scope.
 
-(* Function eval (env : env value) (t : term) (io : IO) (clock : nat) : result * IO * nat :=
-  match t with
-  | Var n => 
-    match lookup env n with 
-    | None => (Rerr, io, clock)
-    | Some v => (Rval v, io, clock)
-    end 
-  | Const l => (Rval (Lit l), io, clock)
-  | Let x t rest => 
-    match eval env t io clock with 
-    | (Rval v, io, clock) => eval (env + (x, v)) rest io clock 
-    | (r, io, clock) => (r, io, clock)
+Function evalₛ (fuel : nat) (env : env value) (t : term) (io : IO) {struct fuel} : result * IO :=
+  match fuel with 
+  | 0 => (Rtimeout, io)
+  | S fuel => 
+    match t with
+    | Var n => 
+      match lookup env n with 
+      | None => (Rerr, io)
+      | Some v => (Rval v, io)
+      end 
+    | Const l => (Rval (Lit l), io)
+    | Let x t rest => 
+      match evalₛ fuel env t io with 
+      | (Rval v, io) => evalₛ fuel (env + (x, v)) rest io 
+      | (r, io) => (r, io)
+      end
+    | LetRec (Fnt fname farg fbody) rest => 
+        let f := Fnt fname farg fbody in
+        evalₛ fuel (env + (fname, Fun f env)) rest io
+    | App f t => 
+        match evalₛ fuel env f io with 
+        | (Rval (Fun (Fnt fname farg fbody) fenv), io) => 
+            match evalₛ fuel env t io with 
+            | (Rval v, io) => 
+                let f := Fnt fname farg fbody in
+                evalₛ fuel (env + (fname, Fun f fenv) + (farg, v)) fbody io
+            | (r, io) => (r, io)
+            end
+        | (Rval _, io) => (Rerr, io)
+        | (r, io) => (r, io)
+        end
+    | In => 
+        match get_input io with 
+        | None => (Reoi, io)
+        | Some (i, io) => (Rval (Lit (IntLit i)), io)
+        end
+    | Out t => 
+        match evalₛ fuel env t io with
+        | (Rval (Lit (IntLit o)), io) => (Rval (Lit UnitLit), outputs io o)
+        | (Rval _, io) => (Rerr, io)
+        | (r, io) => (r, io)
+        end
+    | Ite c t e => 
+        match evalₛ fuel env c io with
+        | (Rval (Lit (BoolLit true)), io) => 
+            evalₛ fuel env t io 
+        | (Rval (Lit (BoolLit false)), io) => 
+            evalₛ fuel env e io 
+        | (Rval _, io) => (Rerr, io)
+        | (r, io) => (r, io)
+        end 
+    | BinaryOp op t1 t2 => 
+        match evalₛ fuel env t1 io with
+        | (Rval v1, io) => 
+            match evalₛ fuel env t2 io with 
+            | (Rval v2, io) => (compute_binary_op op v1 v2, io)
+            | (r, io) => (r, io)
+            end 
+        | (r, io) => (r, io)
+        end
+    | UnaryOp op t => 
+        match evalₛ fuel env t io with 
+        | (Rval v, io) => (compute_unary_op op v, io)
+        | (r, io) => (r, io)
+        end
+    | Match s (ln, lt) (rn, rt) => 
+        match evalₛ fuel env s io with
+        | (Rval (Left v), io) => evalₛ fuel (env + (ln, v)) lt io 
+        | (Rval (Right v), io) => evalₛ fuel (env + (rn, v)) rt io
+        | (Rval _, io) => (Rerr, io)
+        | (r, io) => (r, io)
+        end 
     end
-  | _ => (Rerr, io, clock)
-  end. *)
+  end.
 
-Reserved Notation "'{' io1 '|' Γ '}' t '~>(' f ')' '{' r ',' io2 '}'" (at level 70, no associativity).
+(* Reserved Notation "'{' io1 '|' Γ '}' t '~>(' f ')' '{' r ',' io2 '}'" (at level 70, no associativity).
 Inductive eval : env value -> term -> IO -> nat -> result -> IO -> Prop :=
 | eval_var : forall env n v io,
     env ? n = Some v -> 
@@ -513,4 +595,4 @@ Theorem eval_total: forall t env io f,
   exists r io', eval env t io f r io'.
 Proof.
   eauto using eval_total_ind.
-Qed.
+Qed. *)

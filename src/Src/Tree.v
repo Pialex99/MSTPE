@@ -1,4 +1,3 @@
-From Utils Require Export Int.
 From Common Require Export Literal Primitive.
 
 (* Inductive type : Set := 
@@ -30,3 +29,20 @@ Inductive term : Set :=
 with 
   fnt : Set := Fnt (fname: nat) (arg: nat) (body: term).
   (* fnt : Set := Fnt (fname: nat) (args: list arg) (rettpe: type) (body: term). *)
+
+Fixpoint next_freeₜ (t : term) : nat := 
+  match t with 
+  | Var n => S n 
+  | Const _ => 0
+  | Let x t r => max (next_free t) (max (next_free r) (S x))
+  | LetRec (Fnt n a b) r => 
+      max (S n) (max (S a) (max (next_free b) (next_free r)))
+  | App f t => max (next_free f) (next_free t)
+  | In => 0 
+  | Out t => next_free t
+  | Ite c t e => max (next_free c) (max (next_free t) (next_free e))
+  | BinaryOp _ t1 t2 => max (next_free t1) (next_free t2)
+  | UnaryOp _ t => next_free t 
+  | Match s (ln, lt) (rn, rt) => 
+      max (next_free s) (max (S ln) (max (next_free lt) (max (S rn) (next_free rt))))
+  end.
