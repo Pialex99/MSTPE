@@ -87,7 +87,7 @@ Close Scope Z_scope.
 
 Definition get_value_atom env a := 
   match a with 
-  | Var n => lookup env n
+  | Var n => env ? n
   | Tree.Lit l => Some (Lit l)
   end.
 
@@ -106,19 +106,21 @@ Definition unary_op_atom env op a :=
     | _ => None 
     end.
 
-Definition get_cnt0 (env : env (cnt * env value)) c := 
-  match lookup env c with
-  | Some (Cnt0 _ body, env') => Some (Cnt0 c body, env')
+Inductive cntV := Cnt (cnt : cnt) (envV : env value) (envC : env cntV).
+(* 
+Definition get_cnt0 (env : env cntV) c := 
+  match env ? c with
+  | Some (Cnt (Cnt0 _ body) envV envC) => Some (Cnt (Cnt0 c body) envV envC)
   | _ => None
   end.
 
-Definition get_cnt1 (env : env (cnt * env value)) c := 
-  match lookup env c with
-  | Some (Cnt1 _ arg body, env') => Some (Cnt1 c arg body, env') 
+Definition get_cnt1 (env : env cntV) c := 
+  match env ? c with
+  | Some (Cnt (Cnt1 _ arg body) envV envC) => Some (Cnt (Cnt1 c arg body) envV envC) 
   | _ => None
-  end.
+  end. *)
 
-Function evalₜ (fuel : nat) (envV : env value) (envC : env (cnt * (env value))) (t : term) (io : IO) : result * IO := 
+Function evalₜ (fuel : nat) (envV : env value) (envC : env cntV) (t : term) (io : IO) : result * IO := 
   match fuel with
   | 0 => (Rtimeout, io)
   | S fuel => 
@@ -135,10 +137,10 @@ Function evalₜ (fuel : nat) (envV : env value) (envC : env (cnt * (env value))
           end 
       | LetC (Cnt0 n b) r => 
           let c := Cnt0 n b in 
-          evalₜ fuel envV (envC + (n, (c, envV))) r io 
+          evalₜ fuel envV (envC + (n, Cnt c envV envC)) r io 
       | LetC (Cnt1 n a b) r => 
           let c := Cnt1 n a b in 
-          evalₜ fuel envV (envC + (n, (c, envV))) r io
+          evalₜ fuel envV (envC + (n, Cnt c envV envC)) r io
       | LetF (Fnt fname retC farg fbody) r => 
           let f := Fnt fname retC farg fbody in 
           evalₜ fuel (envV + (fname, Fun f envV)) envC r io 
@@ -153,15 +155,18 @@ Function evalₜ (fuel : nat) (envV : env value) (envC : env (cnt * (env value))
           | _ => (Rerr, io)
           end
       | AppC0 n => 
-          match get_cnt0 envC n with 
-          | Some (Cnt0 _ b, envV) => evalₜ fuel envV empty b io 
+          match envC ? n with 
+          | Some (Cnt (Cnt0 _ b) envV envC) => 
+              let cnt := Cnt (Cnt0 n b) envV envC in 
+              evalₜ fuel envV (envC + (n, cnt)) b io 
           | _ => (Rerr, io)
           end 
       | AppC1 n a => 
-          match get_cnt1 envC n with 
-          | Some (Cnt1 _ carg b, envV) => 
+          match envC ? n with 
+          | Some (Cnt (Cnt1 _ carg b) envV envC) => 
+              let cnt := Cnt (Cnt1 n carg b) envV envC in
               match get_value_atom envV a with 
-              | Some v => evalₜ fuel (envV + (carg, v)) empty b io 
+              | Some v => evalₜ fuel (envV + (carg, v)) (envC + (n, cnt)) b io 
               | _ => (Rerr, io)
               end
           | _ => (Rerr, io)
@@ -170,12 +175,12 @@ Function evalₜ (fuel : nat) (envV : env value) (envC : env (cnt * (env value))
           match get_value_atom envV a with
           | Some (Fun (Fnt fname retC farg fbody) fenv) => 
               let f := Fnt fname retC farg fbody in
-              match get_cnt1 envC c with
-              | Some (Cnt1 _ carg cbody, cenv) => 
-                  let cnt := Cnt1 c carg cbody in 
+              match envC ? c with
+              | Some (Cnt (Cnt1 _ carg cbody) cenv cenvC) => 
+                  let cnt := Cnt (Cnt1 c carg cbody) cenv cenvC in 
                   match get_value_atom envV a with
                   | Some v => 
-                      evalₜ fuel (fenv + (fname, Fun f fenv) + (farg, v)) (empty + (c, (cnt, cenv))) fbody io
+                      evalₜ fuel (fenv + (fname, Fun f fenv) + (farg, v)) (empty + (c, cnt)) fbody io
                   | _ => (Rerr, io)
                   end 
               | _ => (Rerr, io)
@@ -193,15 +198,17 @@ Function evalₜ (fuel : nat) (envV : env value) (envC : env (cnt * (env value))
       | Match s lc rc => 
           match get_value_atom envV s with 
           | Some (Left v) => 
-              match get_cnt1 envC lc with 
-              | Some (Cnt1 _ carg b, envV) => 
-                  evalₜ fuel (envV + (carg, v)) empty b io 
+              match envC ? lc with 
+              | Some (Cnt (Cnt1 _ carg b) envV envC) => 
+                  let cnt := Cnt (Cnt1 lc carg b) envV envC in 
+                  evalₜ fuel (envV + (carg, v)) (envC + (lc, cnt)) b io 
               | _ => (Rerr, io)
               end
           | Some (Right v) => 
-              match get_cnt1 envC rc with 
-              | Some (Cnt1 _ carg b, envV) => 
-                  evalₜ fuel (envV + (carg, v)) empty b io 
+              match envC ? rc with 
+              | Some (Cnt (Cnt1 _ carg b) envV envC) => 
+                  let cnt := Cnt (Cnt1 rc carg b) envV envC in 
+                  evalₜ fuel (envV + (carg, v)) (envC + (rc, cnt)) b io 
               | _ => (Rerr, io)
               end 
           | _ => (Rerr, io)

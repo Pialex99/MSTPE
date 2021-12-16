@@ -15,11 +15,11 @@ Inductive equiv_v : nat -> value -> value -> Prop :=
   | equiv_fun : forall k n1 c1 a1 b1 Γ1 n2 c2 a2 b2 Γ2,
       let f1 := Fnt n1 c1 a1 b1 in 
       let f2 := Fnt n2 c2 a2 b2 in 
-      (forall k' io io1 io2 v ac bc Γc r1 r2, k' < k -> 
+      (forall k' io io1 io2 v ac bc Γc Γcnt r1 r2, k' < k -> 
         let cnt1 := Cnt1 c1 ac bc in
         let cnt2 := Cnt1 c2 ac bc in
-        evalₜ k' (Γ1 + (n1, Fun f1 Γ1) + (a1, v)) (empty + (c1, (cnt1, Γc))) b1 io = (r1, io1) -> 
-        evalₜ k' (Γ2 + (n2, Fun f2 Γ2) + (a2, v)) (empty + (c2, (cnt2, Γc))) b2 io = (r2, io2) -> 
+        evalₜ k' (Γ1 + (n1, Fun f1 Γ1) + (a1, v)) (empty + (c1, Cnt cnt1 Γc Γcnt)) b1 io = (r1, io1) -> 
+        evalₜ k' (Γ2 + (n2, Fun f2 Γ2) + (a2, v)) (empty + (c2, Cnt cnt2 Γc Γcnt)) b2 io = (r2, io2) -> 
           r1 ≡ᵣ r2 @ k' /\ io1 = io2) -> 
         Fun f1 Γ1 ≡ᵥ Fun f2 Γ2 @ k
 with equiv_r : nat -> result -> result -> Prop :=
@@ -109,7 +109,7 @@ Proof with eauto using equiv_v_sym_0, equiv_r_sym_ind with equiv_cps.
   induction v1, v2; inversion 1; 
   repeat reduce...
   constructor; repeat reduce.
-  all: specialize (H2 k' io io2 io1 v ac bc Γc r2 r1 H0 H3 H1) as [Hr Hio]...
+  all: specialize (H2 _ _ _ _ _ _ _ _ _ _ _ H0 H3 H1) as [Hr Hio]...
 Qed.
 
 Lemma equiv_sym_ind : forall k, 
@@ -161,9 +161,9 @@ Proof with eauto 4 using equiv_v_trans_0, equiv_r_trans_ind with equiv_cps lia.
   induction v1, v2, v3; inversion 1; inversion 1; repeat reduce...
   constructor; repeat reduce.
   all: destruct (evalₜ k' (e0 + (n2, Fun (Fnt n2 c2 a2 b2) e0) + (a2, v)) 
-                ({ } + (c2, (Cnt1 c2 ac bc, Γc))) b2 io) as [r0 io0] eqn:E.
-  all: specialize (H2 _ _ _ _ _ _ _ _ _ _ H0 H1 E) as [Hr Hio]; 
-       specialize (H9 _ _ _ _ _ _ _ _ _ _ H0 E H3) as [Hr' Hio']; 
+                ({ } + (c2, Cnt (Cnt1 c2 ac bc) Γc Γcnt)) b2 io) as [r0 io0] eqn:E.
+  all: specialize (H2 _ _ _ _ _ _ _ _ _ _ _ H0 H1 E) as [Hr Hio]; 
+       specialize (H9 _ _ _ _ _ _ _ _ _ _ _ H0 E H3) as [Hr' Hio']; 
        repeat reduce...
 Qed.
 
