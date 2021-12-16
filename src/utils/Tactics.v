@@ -38,6 +38,11 @@ Ltac rewrite_S n :=
 
 Ltac simpl_lia :=
   match goal with 
+  | H: S ?n <= S ?m |- _ =>
+    (* idtac "simpl 0"; *)
+    let a := fresh "A" in
+    assert (a: n <= m) by lia;
+    clear H
   | H: S ?n < S ?m |- _ =>
       (* idtac "simpl 0"; *)
       let a := fresh "A" in
@@ -110,6 +115,9 @@ Ltac reduce :=
   || intuition congruence 
   || destruct_exist_H || destruct_and_H
   || autounfold with *.
+
+#[global]
+Hint Extern 100 => reduce: reduce.
 
 Ltac destruct_match :=
   match goal with 
