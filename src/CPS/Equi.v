@@ -41,7 +41,7 @@ Proof.
 Qed.
 
 Lemma equiv_refl_ind : forall k k', k' <= k -> forall r v, r ≡ᵣ r @ k' /\ v ≡ᵥ v @ k'.
-Proof with auto using equiv_fun_0 with equiv_cps.
+Proof with repeat reduce; auto using equiv_fun_0 with equiv_cps.
   induction k; split.
   - (* r 0 *) 
     destruct k'; try lia.
@@ -55,17 +55,13 @@ Proof with auto using equiv_fun_0 with equiv_cps.
     induction r...
     constructor.
     induction v0...
-    destruct f; constructor.
-    repeat reduce.
-    rewrite H1 in H2.
-    inversion H2; clear H2; subst.
+    destruct f; constructor...
+    rewrite H1 in H2...
     unshelve epose proof (IHk k'0 _ r2 v) as [H2 _]; auto with lia.
   - (* v S k *)
     induction v...
-    destruct f; constructor.
-    repeat reduce.
-    rewrite H1 in H2.
-    inversion H2; clear H2; subst.
+    destruct f; constructor...
+    rewrite H1 in H2...
     unshelve epose proof (IHk k'0 _ r2 v) as [H2 _]; auto with lia.
 Qed.
 

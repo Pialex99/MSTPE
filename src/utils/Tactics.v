@@ -29,20 +29,46 @@ Ltac destruct_and_H :=
     destruct H
   end.
 
-Ltac invert H := inversion H; subst.
+Ltac invert H := inversion H; subst; clear H.
 
 Ltac rewrite_S n :=
   let a := fresh "A" in
   assert (a: S n = n + 1) by lia;
   rewrite a in *; clear a.
 
+Lemma max_le : forall n m k, 
+  n <= k /\ m <= k -> Nat.max n m <= k.
+Proof. 
+  lia.
+Qed.
+
+Opaque Nat.max.
+
 Ltac simpl_lia :=
   match goal with 
+  | |- Nat.max ?n ?m <= ?k => 
+      apply max_le; split
+  | H : Nat.max ?n ?m < ?k |- _ =>
+      let A := fresh "A" in
+      let A' := fresh "A" in 
+      assert (A: n < k) by lia;
+      assert (A': m < k) by lia;
+      clear H
+  | H : Nat.max ?n ?m <= ?k |- _ =>
+      let A := fresh "A" in
+      let A' := fresh "A" in 
+      assert (A: n <= k) by lia;
+      assert (A': m <= k) by lia;
+      clear H
+  | H: Nat.max ?n ?m = ?k |- _ =>
+      let A := fresh "A" in 
+      assert (n = k \/ m = k) as [A | A] by lia;
+      clear H
   | H: S ?n <= S ?m |- _ =>
-    (* idtac "simpl 0"; *)
-    let a := fresh "A" in
-    assert (a: n <= m) by lia;
-    clear H
+      (* idtac "simpl 0"; *)
+      let a := fresh "A" in
+      assert (a: n <= m) by lia;
+      clear H
   | H: S ?n < S ?m |- _ =>
       (* idtac "simpl 0"; *)
       let a := fresh "A" in
@@ -110,9 +136,25 @@ Ltac simpl_lia :=
       lia
   end.
 
+Ltac clear_dup := 
+  match goal with
+  | H : ?t, H' : ?t |- _ => clear H'
+  end.
+
+Ltac invert_constr := 
+  match goal with
+  | H : ?C _ = ?C _ |- _ => is_constructor C; invert H
+  | H : ?C _ _ = ?C _ _ |- _ => is_constructor C; invert H
+  | H : ?C _ _ _ = ?C _ _ _ |- _ => is_constructor C; invert H
+  | H : ?C _ _ _ _ = ?C _ _ _ _ |- _ => is_constructor C; invert H
+  | H : ?C _ _ _ _ _ = ?C _ _ _ _ _ |- _ => is_constructor C; invert H
+  | H : ?C _ _ _ _ _ _ = ?C _ _ _ _ _ _ |- _ => is_constructor C; invert H
+  end.
+
 Ltac reduce :=
   intros || (cbn in *) || subst || subst_all
   || intuition congruence 
+  || clear_dup || invert_constr
   || destruct_exist_H || destruct_and_H
   || autounfold with *.
 

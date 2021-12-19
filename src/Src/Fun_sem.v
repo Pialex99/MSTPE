@@ -11,12 +11,12 @@ Inductive value :=
 | Fun (f: fnt) (e: env value).
 
 #[global]
-Hint Constructors value : eval.
+Hint Constructors value : evalₛ.
 
 Fixpoint next_freeᵥ (v : value) : nat := 
   match v with 
   | Lit _ => 0
-  | Tuple v1 v2 => Peano.max (next_freeᵥ v1) (next_freeᵥ v2)
+  | Tuple v1 v2 => Nat.max (next_freeᵥ v1) (next_freeᵥ v2)
   | Left v => next_freeᵥ v 
   | Right v => next_freeᵥ v
   | Fun (Fnt fname farg fbody) env => 
@@ -24,16 +24,16 @@ Fixpoint next_freeᵥ (v : value) : nat :=
         match env with 
         | nil => 0 
         | (n, v) :: env => 
-            Peano.max (S n) (Peano.max (next_freeᵥ v) (next_free_env env))
+            Nat.max (S n) (Nat.max (next_freeᵥ v) (next_free_env env))
         end in 
-      Peano.max (S fname) (Peano.max (S farg) (Peano.max (next_freeₜ fbody) (next_free_env env)))
+      Nat.max (S fname) (Nat.max (S farg) (Nat.max (next_free fbody) (next_free_env env)))
   end.
 
 Fixpoint next_free_env env := 
   match env with 
   | nil => 0 
   | (n, v) :: env => 
-      Peano.max (S n) (Peano.max (next_freeᵥ v) (next_free_env env))
+      Nat.max (S n) (Nat.max (next_freeᵥ v) (next_free_env env))
   end.
 
 Fixpoint value_eqb (v1 v2 : value) :=

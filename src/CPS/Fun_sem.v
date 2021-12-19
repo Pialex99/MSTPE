@@ -13,6 +13,8 @@ Inductive value :=
 | Right (v: value)
 | Fun (f: fnt) (e: env value).
 
+Inductive cntV := Cnt (cnt : cnt) (envV : env value) (envC : env cntV).
+
 Fixpoint value_eqb (v1 v2 : value) :=
   match v1, v2 with 
   | Lit l1, Lit l2 => lit_eqb l1 l2
@@ -20,6 +22,53 @@ Fixpoint value_eqb (v1 v2 : value) :=
   | Left v1, Left v2 => value_eqb v1 v2
   | Right v1, Right v2 => value_eqb v1 v2
   | _, _ => false
+  end.
+
+Fixpoint next_freeᵥ v := 
+  match v with
+  | Lit _ => 0
+  | Tuple v1 v2 => Nat.max (next_freeᵥ v1) (next_freeᵥ v2)
+  | Left v => next_freeᵥ v 
+  | Right v => next_freeᵥ v 
+  | Fun (Fnt n c a b) e => 
+      let fix next_free_env env := 
+        match env with
+        | nil => 0 
+        | (n, v) :: env => 
+            Nat.max (S n) (Nat.max (next_freeᵥ v) (next_free_env env))
+        end in 
+      Nat.max (S n) (Nat.max (S c) (Nat.max (S a) (Nat.max (next_free b) (next_free_env e))))
+  end.
+
+Fixpoint next_free_envV env :=
+  match env with
+  | nil => 0 
+  | (n, v) :: env =>
+      Nat.max (S n) (Nat.max (next_freeᵥ v) (next_free_envV env))
+  end.
+
+Fixpoint next_free_cnt cnt := 
+  let fix next_free_cnt_envC env :=
+    match env with
+    | nil => 0 
+    | (n, c) :: env => 
+        Nat.max (S n) (Nat.max (next_free_cnt c) (next_free_cnt_envC env))
+    end 
+  in 
+    match cnt with 
+    | Cnt (Cnt0 c b) envV envC => 
+        Nat.max (S c) (Nat.max (next_free b) 
+          (Nat.max (next_free_envV envV) (next_free_cnt_envC envC)))
+    | Cnt (Cnt1 c a b) envV envC => 
+        Nat.max (S c) (Nat.max (S a) (Nat.max (next_free b) 
+          (Nat.max (next_free_envV envV) (next_free_cnt_envC envC))))
+    end.
+
+Fixpoint next_free_envC env :=
+  match env with
+  | nil => 0 
+  | (n, c) :: env => 
+      Nat.max (S n) (Nat.max (next_free_cnt c) (next_free_envC env))
   end.
 
 (* Definition is_int_val v := 
@@ -106,7 +155,6 @@ Definition unary_op_atom env op a :=
     | _ => None 
     end.
 
-Inductive cntV := Cnt (cnt : cnt) (envV : env value) (envC : env cntV).
 (* 
 Definition get_cnt0 (env : env cntV) c := 
   match env ? c with

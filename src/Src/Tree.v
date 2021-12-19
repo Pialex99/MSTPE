@@ -30,19 +30,34 @@ with
   fnt : Set := Fnt (fname: nat) (arg: nat) (body: term).
   (* fnt : Set := Fnt (fname: nat) (args: list arg) (rettpe: type) (body: term). *)
 
-Fixpoint next_freeₜ (t : term) : nat := 
+Fixpoint next_free (t : term) : nat := 
   match t with 
   | Var n => S n 
   | Const _ => 0
-  | Let x t r => max (next_freeₜ t) (max (next_freeₜ r) (S x))
+  | Let x t r => max (next_free t) (max (next_free r) (S x))
   | LetRec (Fnt n a b) r => 
-      max (S n) (max (S a) (max (next_freeₜ b) (next_freeₜ r)))
-  | App f t => max (next_freeₜ f) (next_freeₜ t)
+      max (S n) (max (S a) (max (next_free b) (next_free r)))
+  | App f t => max (next_free f) (next_free t)
   | In => 0 
-  | Out t => next_freeₜ t
-  | Ite c t e => max (next_freeₜ c) (max (next_freeₜ t) (next_freeₜ e))
-  | BinaryOp _ t1 t2 => max (next_freeₜ t1) (next_freeₜ t2)
-  | UnaryOp _ t => next_freeₜ t 
+  | Out t => next_free t
+  | Ite c t e => max (next_free c) (max (next_free t) (next_free e))
+  | BinaryOp _ t1 t2 => max (next_free t1) (next_free t2)
+  | UnaryOp _ t => next_free t 
   | Match s (ln, lt) (rn, rt) => 
-      max (next_freeₜ s) (max (S ln) (max (next_freeₜ lt) (max (S rn) (next_freeₜ rt))))
+      max (next_free s) (max (S ln) (max (next_free lt) (max (S rn) (next_free rt))))
+  end.
+
+Fixpoint size t : nat := 
+  match t with 
+  | Var _ => 1 
+  | Const _ => 1
+  | Let _ t r => 1 + size t + size r 
+  | LetRec (Fnt _ _ b) r => 1 + size b + size r
+  | App f t => 1 + size f + size t 
+  | In => 1 
+  | Out t => 1 + size t 
+  | Ite c t e => 1 + size c + size t + size e 
+  | BinaryOp _ t1 t2 => 1 + size t1 + size t2
+  | UnaryOp _ t => 1 + size t
+  | Match s (_, lt) (_, rt) => 1 + size s + size lt + size rt
   end.
