@@ -1,53 +1,266 @@
-Require Export PeanoNat List.
+Require Export PeanoNat Nat List.
 Require Import Lia.
 From Utils Require Import Tactics.
 
 Open Scope nat_scope.
 Open Scope list_scope.
 
+(* In an environment the tuples are kept in increasing order with respect to the key *)
+(* We do so to have a unique representation for each mapping *)
 Definition env (A: Type) : Type := list (nat * A).
 
+Declare Scope env_scope.
+Open Scope env_scope.
+
 Definition empty {A: Type} : env A := nil.
+Notation "'{' '}'" := empty : env_scope.
+
 Fixpoint lookup {A: Type} (e : env A) (n: nat) : option A :=
   match e with 
   | nil => None 
-  | h :: t => 
-    if ((fst h) =? n) then Some (snd h)
+  | (n', a') :: t => 
+    if (n =? n') then Some a'
     else lookup t n
   end.
-Definition add {A: Type} (e : env A) (n: nat) (a: A) : env A := 
-  (n, a) :: e.
-
-Declare Scope env_scope.
-
-Notation "'{' '}'" := empty : env_scope.
-Notation "env '+' '(' k ',' v ')'" := (add env k v) 
-  (at level 50, left associativity) : env_scope.
 Notation "env '?' k" := (lookup env k) 
-  (at level 50, no associativity) : env_scope.
+  (at level 60, no associativity) : env_scope.
 
-Open Scope env_scope.
+Fixpoint add {A: Type} (e : env A) (n: nat) (a: A) : env A := 
+  match e with
+  | nil => (n, a) :: nil
+  | (n', a') :: t =>
+      if (n =? n') then (n, a) :: t
+      else if (n <? n') then (n, a) :: e
+      else (n', a') :: add t n a
+  end.
+Notation "env '+' '(' k ',' v ')'" := (add env k v) 
+  (at level 40, left associativity) : env_scope.
 
-Theorem lookup_empty: forall A k, lookup (@empty A) k = None.
+Fixpoint update {A: Type} (e1 e2 : env A) : env A :=
+  match e2 with
+  | nil => e1 
+  | (n, a) :: e2 =>
+      (update e1 e2) + (n, a)
+  end.
+Notation "env1 '<++>' env2" := (update env1 env2)
+  (at level 50, left associativity) : env_scope.
+
+Fixpoint well_ordered {A: Type} (e : env A) {struct e} : Prop :=
+  match e with
+  | nil => True 
+  | (n1, a1) :: e => 
+      match e with
+      | nil => True
+      | (n2, a2) :: _ => 
+          if n1 <? n2 then well_ordered e 
+          else False
+      end
+  end.
+
+Theorem lookup_empty: forall A k, (@empty A) ? k = None.
 Proof. auto. Qed.
 
-Theorem lookup_add_eq: forall A (e : env A) n1 n2 v,
-  n1 = n2 -> 
-    (e + (n1, v)) ? n2 = Some v.
+Theorem lookup_add_eq: forall A (e : env A) n v,
+    (e + (n, v)) ? n = Some v.
 Proof.
-  intros; simpl; subst.
-  rewrite Nat.eqb_refl.
-  auto.
+  induction e; repeat reduce || destruct_match.
+  all: rewrite Nat.eqb_refl in *; discriminate.
 Qed.
 
 Theorem lookup_add_ne: forall A (e : env A) n1 n2 v,
   n1 <> n2 ->
     (e + (n1, v)) ? n2 = e ? n2.
 Proof.
-  intros; simpl.
-  apply_anywhere Nat.eqb_neq.
-  rewrite H.
-  auto.
+  induction e; repeat reduce || destruct_match.
+  all: repeat rewrite Nat.eqb_eq in *; subst; auto with exfalso.
 Qed.
 
-Opaque env empty lookup add.
+Theorem add_com : forall A (e : env A) n1 n2 a1 a2, n1 <> n2 ->
+  e + (n1, a1) + (n2, a2) = e + (n2, a2) + (n1, a1).
+Proof.
+  Opaque Nat.ltb.
+  induction e; repeat reduce || destruct_match.
+  all: repeat rewrite Nat.eqb_eq in * 
+           || rewrite Nat.ltb_lt in * 
+           || rewrite Nat.ltb_ge in *; 
+        subst; auto with exfalso lia.
+  f_equal; auto.
+Qed.  
+
+Corollary lookup_add_com : forall A (env : env A) n n1 n2 v1 v2, n1 <> n2 ->
+  env + (n1, v1) + (n2, v2) ? n = env + (n2, v2) + (n1, v1) ? n.
+Proof.
+  intros.
+  rewrite add_com; auto.
+Qed.
+
+Theorem add_dup : forall A (e : env A) n a a', 
+  e + (n, a) + (n, a') = e + (n, a').
+Proof.
+  induction e; repeat reduce || destruct_match.
+  all: repeat rewrite Nat.eqb_eq in * 
+           || rewrite Nat.eqb_refl in *
+           || rewrite Nat.ltb_lt in * 
+           || rewrite Nat.ltb_ge in *;
+       subst; auto with lia.
+Qed.
+
+Corollary lookup_add_dup : forall A (env : env A) n n' v1 v2, 
+  env + (n, v1) + (n, v2) ? n' = env + (n, v2) ? n'.
+Proof.
+  intros.
+  rewrite add_dup; auto.
+Qed.
+
+Theorem lookup_concat_not_found: forall A (e1 e2 : env A) n,
+  (e1 ? n = None) -> (e2 ? n = None) -> (e2 <++> e1) ? n = None.
+Proof.
+  induction e1; repeat reduce || destruct_match.
+  rewrite Nat.eqb_neq in *.
+  rewrite lookup_add_ne; auto.
+Qed.
+
+Theorem lookup_concat_not_found': forall A (e1 e2 : env A) n,
+   (e2 <++> e1) ? n = None -> (e1 ? n = None) /\ (e2 ? n = None).
+Proof.
+  induction e1; repeat reduce || destruct_match.
+  all: repeat rewrite Nat.eqb_eq in * 
+           || rewrite Nat.eqb_refl in *
+           || rewrite Nat.eqb_neq in *
+           || rewrite Nat.ltb_lt in * 
+           || rewrite Nat.ltb_ge in *;
+       subst; auto with lia.
+  - rewrite lookup_add_eq in H; auto.
+  - rewrite lookup_add_ne in H; auto.
+    apply IHe1 in H as [? ?]; auto.
+  - destruct (Nat.eq_dec n n0); subst.
+    * rewrite lookup_add_eq in H; auto.
+      discriminate.
+    * rewrite lookup_add_ne in H; auto.
+      apply IHe1 in H as [? ?]; auto.
+Qed.
+
+Theorem lookup_concat_first: forall A (e1 e2 : env A) n v,
+  e1 ? n = Some v -> (e2 <++> e1) ? n = Some v.
+Proof.
+  induction e1; repeat reduce || destruct_match.
+  all: rewrite Nat.eqb_eq in E || rewrite Nat.eqb_neq in E; 
+       subst; auto using lookup_add_eq.
+  rewrite lookup_add_ne; auto.
+Qed.
+
+Theorem lookup_concat_second: forall A (e1 e2 : env A) n,
+  e1 ? n = None -> (e2 <++> e1) ? n = e2 ? n.
+Proof.
+  induction e1; repeat reduce || destruct_match.
+  rewrite lookup_add_ne; auto.
+  rewrite Nat.eqb_neq in E.
+  intro; subst; lia.
+Qed.
+
+Theorem lookup_concat_found: forall A (e1 e2 : env A) n v,
+  (e2 <++> e1) ? n = Some v -> (e1 ? n = Some v) \/ (e1 ? n = None /\ e2 ? n = Some v).
+Proof.
+  induction e1; repeat reduce || destruct_match.
+  - rewrite Nat.eqb_eq in E; subst.
+    rewrite lookup_add_eq in H.
+    auto.
+  - rewrite Nat.eqb_neq in E.
+    rewrite lookup_add_ne in H; auto.
+Qed.
+
+Lemma update_add: forall A (e : env A) n v,
+  e <++> ({ } + (n, v)) = e + (n, v).
+Proof. auto. Qed.
+  
+Lemma add_update: forall A (e1 e2 : env A) n v,
+  (e1 <++> e2) + (n, v) = e1 <++> (e2 + (n, v)).
+Proof.
+  induction e2; repeat reduce || destruct_match.
+  - rewrite Nat.eqb_eq in E; subst.
+    auto using add_dup.
+  - rewrite Nat.eqb_neq in E.
+    rewrite <- IHe2.
+    auto using add_com.
+Qed.
+
+Lemma update_empty: forall A (e : env A),
+  e <++> { } = e.
+Proof. auto. Qed.
+
+Lemma update_empty': forall A (e : env A),
+  well_ordered e -> { } <++> e = e.
+Proof.
+  induction e; reduce.
+  repeat destruct_match; reduce.
+  apply IHe in H.
+  rewrite H.
+  reduce.
+  rewrite E2.
+  destruct_match; reduce.
+  rewrite Nat.eqb_eq in E; rewrite Nat.ltb_lt in E2.
+  lia.
+Qed.
+
+Ltac env := 
+  match goal with
+  | H: (_ <++> _) ? _ = None |- _ => 
+    let H1 := fresh "H" in 
+    let H2 := fresh "H" in 
+    apply lookup_concat_not_found' in H as [H1 H2]
+  | H1: ?e1 ? ?n = None,
+    H2: ?e2 ? ?n = None |- _ =>
+    poseNew (Mark (e1, e2, n) "lookup_concat_not_found");
+    pose proof (lookup_concat_not_found _ _ _ _ H1 H2)
+  | [H: context[_ <++> { }] |- _ ] =>
+    rewrite update_empty in H
+  | [|- context[_ <++> { }]] =>
+    rewrite update_empty
+  | [H: context[{ } <++> _] |- _ ] =>
+    rewrite update_empty' in H
+  | [|- context[{ } <++> _]] =>
+    rewrite update_empty'
+  | [H: context[(_ <++> _) + (_, _)] |- _ ] => 
+    rewrite add_update in H
+  | [|- context[(_ <++> _) + (_, _)]] => 
+    rewrite add_update
+  | [H: context[_ <++> ({ } + (_, _))] |- _ ] =>
+    rewrite update_add in H
+  | [|- context[_ <++> ({ } + (_, _))]] =>
+    rewrite update_add
+  | [H: context[{ } ? _] |- _ ] => 
+    rewrite lookup_empty in H
+  | [|- context[{ } ? _]] => 
+    rewrite lookup_empty
+  | [H: context[(_ + (?n, _)) ? ?n] |- _ ] => 
+    rewrite lookup_add_eq in H
+  | [|- context[(_ + (?n, _)) ? ?n]] => 
+    rewrite lookup_add_eq
+  | [H: ?n1 <> ?n2 |- context[(_ + (?n1, _)) ? ?n2]] => 
+    rewrite (lookup_add_ne _ _ _ _ _ H)
+  | [H: ?n1 <> ?n2, 
+     H': context[(_ + (?n1, _)) ? ?n2] |- _ ] => 
+    rewrite (lookup_add_ne _ _ _ _ _ H) in H'
+  | [H: context[(_ + (?n, _) + (?n, _))] |- _ ] => 
+    rewrite add_dup in H
+  | [|- context[(_ + (?n, _) + (?n, _))]] => 
+    rewrite add_dup
+  | [H: ?n1 <> ?n2 |- context[(_ + (?n1, _) + (?n2, _))]] => 
+    rewrite (add_com _ _ _ _ _ _ _ H)
+  | [H: ?n1 <> ?n2, 
+     H': context[(_ + (?n1, _) + (?n2, _))] |- _ ] => 
+    rewrite (add_com _ _ _ _ _ _ _ H) in H'
+  | [|- context[(?e2 <++> ?e1) ? ?n]] => 
+    let E := fresh "E" in 
+    destruct (e1 ? n) eqn:E;
+    [rewrite (lookup_concat_first _ _ _ _ _ E) 
+    | rewrite (lookup_concat_second _ _ _ _ E)]
+  | [|- context[(_ + (?n1, _) + (?n2, _))]] => 
+    destruct (Nat.eq_dec n1 n2); 
+    [subst; rewrite add_dup | rewrite add_com]
+  | [|- context[(_ + (?n1, _)) ? ?n2]] =>
+    destruct (Nat.eq_dec n1 n2); 
+    [subst; rewrite lookup_add_eq | rewrite lookup_add_ne]
+  end.
+
+Global Opaque empty lookup add update.

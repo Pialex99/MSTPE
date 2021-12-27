@@ -1,4 +1,4 @@
-Require Export Lia.
+Require Export Lia String.
 
 #[global]
 Hint Extern 50 => lia: lia.
@@ -42,7 +42,7 @@ Proof.
   lia.
 Qed.
 
-Opaque Nat.max.
+Global Opaque Nat.max.
 
 Ltac simpl_lia :=
   match goal with 
@@ -151,25 +151,18 @@ Ltac invert_constr :=
   | H : ?C _ _ _ _ _ _ = ?C _ _ _ _ _ _ |- _ => is_constructor C; invert H
   end.
 
-Ltac reduce :=
-  intros || (cbn in *) || subst || subst_all
-  || intuition congruence 
+Ltac reduce := repeat (
+  intros || split || (cbn in *) || subst || subst_all
+  || intuition auto || congruence 
   || clear_dup || invert_constr
-  || destruct_exist_H || destruct_and_H
-  || autounfold with *.
+  || destruct_exist_H || destruct_and_H).
 
 #[global]
 Hint Extern 100 => reduce: reduce.
 
 Ltac destruct_match :=
   match goal with 
-  | [|- context[if ?e then _ else _]] => 
-    let freshE := fresh "E" in
-      destruct e eqn:freshE
   | [|- context[match ?e with _ => _ end]] => 
-    let freshE := fresh "E" in
-      destruct e eqn:freshE
-  | [_:context[if ?e then _ else _] |- _] => 
     let freshE := fresh "E" in
       destruct e eqn:freshE
   | [_:context[match ?e with _ => _ end] |- _] => 
@@ -177,7 +170,85 @@ Ltac destruct_match :=
       destruct e eqn:freshE
   end.
 
+(* Taken from https://github.com/epfl-lara/SystemFR/blob/master/Tactics.v *)
+Ltac isThere P := match goal with
+  | H: ?Q |- _ => unify P Q
+(*  | |- ?Q => unify P Q *)
+  end.
+
+Ltac termNotThere p :=
+  let P := type of p in
+    tryif (isThere P) then fail else idtac.
+
+Ltac poseNew E := termNotThere E; pose proof E.
+
+(* Marking contexts to avoid applying the same step twice *)
+(* Used to ensure termination of some tactics *)
+Inductive Marked {T}: T -> string -> Type :=
+| Mark: forall t s, Marked t s
+.
+
+Ltac clear_marked :=
+  repeat match goal with
+          | H: Marked _ _ |- _ => clear H
+          end.
+
+Notation "'internal'" := (Marked _ _) (at level 50).
+  
+Ltac apply_any :=
+  match goal with
+  | H: _ |- _ => apply H
+  end.
+
+Ltac rewrite_any :=
+  match goal with
+  | H: _ |- _ => rewrite H in *
+  end.
+
+Ltac erewrite_any :=
+  match goal with
+  | H: _ |- _ => erewrite H in *
+  end.
+
+Ltac rewrite_back_any :=
+  match goal with
+  | H: _ |- _ => rewrite <- H in *
+  end.
+
+Ltac eapply_any :=
+  match goal with
+  | H: _ |- _ => eapply H
+  end.
+
 Ltac apply_anywhere f :=
-  match goal with 
-  | H:_ |- _ => apply f in H
-  end. 
+  match goal with
+  | H: _ |- _ => apply f in H
+  end.
+
+Ltac eapply_anywhere f :=
+  match goal with
+  | H: _ |- _ => eapply f in H
+  end.
+
+Ltac rewrite_anywhere f :=
+  match goal with
+  | H: _ |- _ => rewrite f in H
+  end.
+
+Ltac erewrite_anywhere f :=
+  match goal with
+  | H: _ |- _ => erewrite f in H
+  end.
+
+Ltac instantiate_any :=
+  match goal with
+  | H1: forall x, _ -> _, H2: _ |- _ =>
+    poseNew (Mark (H1, H2) "instantiation");
+    pose proof (H1 _ H2)
+  | H1: forall x y, _ -> _, H2: _ |- _ =>
+    poseNew (Mark (H1, H2) "instantiation");
+    pose proof (H1 _ _ H2)
+  | H1: forall x y z, _ -> _, H2: _ |- _ =>
+    poseNew (Mark (H1, H2) "instantiation");
+    pose proof (H1 _ _ _ H2)
+  end.
