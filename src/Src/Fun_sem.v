@@ -13,6 +13,18 @@ Inductive value :=
 #[global]
 Hint Constructors value : evalₛ.
 
+Section NF_v.
+  Variable nf_v : value -> nat.
+
+  Fixpoint nf_env env := 
+    match env with 
+    | nil => 0 
+    | (n, v) :: env => 
+        Nat.max (S n) (Nat.max (nf_v v) (nf_env env))
+    end.
+  
+End NF_v.
+
 Fixpoint next_freeᵥ (v : value) : nat := 
   match v with 
   | Lit _ => 0
@@ -20,21 +32,10 @@ Fixpoint next_freeᵥ (v : value) : nat :=
   | Left v => next_freeᵥ v 
   | Right v => next_freeᵥ v
   | Fun (Fnt fname farg fbody) env => 
-      let fix next_free_env env := 
-        match env with 
-        | nil => 0 
-        | (n, v) :: env => 
-            Nat.max (S n) (Nat.max (next_freeᵥ v) (next_free_env env))
-        end in 
-      Nat.max (S fname) (Nat.max (S farg) (Nat.max (next_free fbody) (next_free_env env)))
+      Nat.max (S fname) (Nat.max (S farg) (Nat.max (next_free fbody) (nf_env next_freeᵥ env)))
   end.
 
-Fixpoint next_free_env env := 
-  match env with 
-  | nil => 0 
-  | (n, v) :: env => 
-      Nat.max (S n) (Nat.max (next_freeᵥ v) (next_free_env env))
-  end.
+Definition next_free_env := nf_env next_freeᵥ.
 
 Fixpoint value_eqb (v1 v2 : value) :=
   match v1, v2 with 
