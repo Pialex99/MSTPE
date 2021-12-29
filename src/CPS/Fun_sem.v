@@ -15,6 +15,42 @@ Inductive value :=
 
 Inductive cntV := Cnt (cnt : cnt) (envV : env value) (envC : env cntV).
 
+Section Renameₑ.
+  Variable rename_v : value -> value.
+  Variable e : env nat.
+
+  Fixpoint rename_e (env: env value) := 
+    match env with 
+    | nil => nil 
+    | (n, v) :: env => 
+        let n := get_or_id e n in
+        let v := rename_v v in 
+        let env := rename_e env in 
+          (n, v) :: env
+    end.
+End Renameₑ.
+
+Section Renameᵥ.
+  Variable e : env nat.
+
+  Fixpoint renameᵥ (v : value) := 
+    match v with
+    | Lit _ => v
+    | Tuple v1 v2 => Tuple (renameᵥ v1) (renameᵥ v2)
+    | Left v => Left (renameᵥ v)
+    | Right v => Right (renameᵥ v)
+    | Fun (Fnt n c a b) Γ => 
+        let n := get_or_id e n in
+        let c := get_or_id e c in
+        let a := get_or_id e a in
+        let b := renameₜ e b in
+        let Γ := rename_e renameᵥ e Γ in 
+          Fun (Fnt n c a b) Γ
+    end.
+End Renameᵥ.
+
+Definition renameₑ (e env : env nat) := rename_e (renameᵥ e) e.
+
 Fixpoint value_eqb (v1 v2 : value) :=
   match v1, v2 with 
   | Lit l1, Lit l2 => lit_eqb l1 l2
@@ -24,7 +60,99 @@ Fixpoint value_eqb (v1 v2 : value) :=
   | _, _ => false
   end.
 
+Fixpoint has_no_fun_val v := 
+  match v with 
+  | Fun _ _ => False
+  | Lit _ => True
+  | Left v => has_no_fun_val v
+  | Right v => has_no_fun_val v 
+  | Tuple v1 v2 => has_no_fun_val v1 /\ has_no_fun_val v2
+  end.
+
+Lemma value_eqb_refl : forall v, has_no_fun_val v -> value_eqb v v = true.
+Proof.
+  induction v; reduce; intuition auto using lit_eqb_refl with bool.
+Qed.
+
+(* Fixpoint next_free_envV env :=
+  match env with
+  | nil => 0 
+  | (n, v) :: env =>
+      Nat.max (S n) (Nat.max (next_freeᵥ v) (next_free_envV env))
+  end
+with next_freeᵥ v := 
+match v with 
+| Lit _ => 0
+| Tuple v1 v2 => Nat.max (next_freeᵥ v1) (next_freeᵥ v2)
+| Left v => next_freeᵥ v
+| Right v => next_freeᵥ v
+| Fun (Fnt n c a b) e => 
+    Nat.max (S n) (Nat.max (S c) (Nat.max (S a) (Nat.max (next_free b) (next_free_envV e))))
+  end. *)
+
+(* Fixpoint next_freeᵥ v := 
+  match v with 
+  | Lit _ => 0
+  | Tuple v1 v2 => Nat.max (next_freeᵥ v1) (next_freeᵥ v2)
+  | Left v => next_freeᵥ v
+  | Right v => next_freeᵥ v
+  | Fun (Fnt n c a b) e => 
+      Nat.max (S n) (Nat.max (S c) (Nat.max (S a) (Nat.max (next_free b) (next_free_envV e))))
+  end
+with next_free_envV env :=
+  match env with
+  | nil => 0 
+  | (n, v) :: env =>
+      Nat.max (S n) (Nat.max (next_freeᵥ v) (next_free_envV env))
+  end. *)
+
+Section NFᵥ.
+  Variable nf_v : value -> nat.
+
+  Fixpoint nf_envV env :=
+    match env with
+    | nil => 0 
+    | (n, v) :: env =>
+        Nat.max (S n) (Nat.max (nf_v v) (nf_envV env))
+    end.
+End NFᵥ.
+  
 Fixpoint next_freeᵥ v := 
+  match v with
+  | Lit _ => 0
+  | Tuple v1 v2 => Nat.max (next_freeᵥ v1) (next_freeᵥ v2)
+  | Left v => next_freeᵥ v 
+  | Right v => next_freeᵥ v 
+  | Fun (Fnt n c a b) e => 
+      Nat.max (S n) (Nat.max (S c) (Nat.max (S a) (Nat.max (next_free b) (nf_envV next_freeᵥ e))))
+  end.
+
+Definition next_free_envV := nf_envV next_freeᵥ.
+
+Section NF_cnt.
+  Variable nf_cnt : cntV -> nat.
+
+  Fixpoint nf_envC env :=
+    match env with
+    | nil => 0 
+    | (n, c) :: env => 
+        Nat.max (S n) (Nat.max (nf_cnt c) (nf_envC env))
+    end.
+End NF_cnt.
+
+Fixpoint next_free_cnt cnt := 
+  match cnt with 
+  | Cnt (Cnt0 c b) envV envC => 
+      Nat.max (S c) (Nat.max (next_free b) 
+        (Nat.max (next_free_envV envV) (nf_envC next_free_cnt envC)))
+  | Cnt (Cnt1 c a b) envV envC => 
+      Nat.max (S c) (Nat.max (S a) (Nat.max (next_free b) 
+        (Nat.max (next_free_envV envV) (nf_envC next_free_cnt envC))))
+  end.
+  
+Definition next_free_envC := nf_envC next_free_cnt.
+
+(* Fixpoint next_freeᵥ v := 
   match v with
   | Lit _ => 0
   | Tuple v1 v2 => Nat.max (next_freeᵥ v1) (next_freeᵥ v2)
@@ -69,7 +197,7 @@ Fixpoint next_free_envC env :=
   | nil => 0 
   | (n, c) :: env => 
       Nat.max (S n) (Nat.max (next_free_cnt c) (next_free_envC env))
-  end.
+  end. *)
 
 (* Definition is_int_val v := 
   match v with
@@ -140,6 +268,30 @@ Definition get_value_atom env a :=
   | Tree.Lit l => Some (Lit l)
   end.
 
+(* Lemma get_val_env_com : forall a env env' n1 v1 n2 v2, n1 <> n2 -> 
+  get_value_atom (env + (n1, v1) + (n2, v2) <++> env') a = get_value_atom (env + (n2, v2) + (n1, v1) <++> env') a.
+Proof.
+  repeat reduce || env.
+Qed.
+
+Lemma get_val_env_dup : forall a env env' n v v',
+  get_value_atom ((env + (n, v') + (n, v)) <++> env') a = get_value_atom ((env + (n, v)) <++> env') a.
+Proof.
+  repeat reduce || env.
+Qed.
+
+Ltac rewrite_get_val := 
+  match goal with
+  | [ |- context[get_value_atom ((_ + (?n, _) + (?n, _)) <++> _) _]] => 
+        rewrite get_val_env_dup
+  | [H: ?n1 <> ?n2 |- context[get_value_atom (_ + (?n1, _) + (?n2, _) <++> _) ?a]] => 
+        poseNew (Mark (n1, n2, a) "rewriting get_value_atom");
+        rewrite (get_val_env_com a _ _ _ _ _ _ H)
+  | [H: ?n1 = ?n2 -> False |- context[get_value_atom (_ + (?n1, _) + (?n2, _) <++> _) ?a]] => 
+        poseNew (Mark (n1, n2, a) "rewriting get_value_atom");
+        rewrite (get_val_env_com a _ _ _ _ _ _ H)
+  end. *)
+
 Definition binary_op_atom env op a1 a2 := 
   let v1 := get_value_atom env a1 in
   let v2 := get_value_atom env a2 in 
@@ -148,6 +300,34 @@ Definition binary_op_atom env op a1 a2 :=
     | _, _ => None 
     end.
 
+(* Lemma binary_env_com : forall a1 a2 op env env' n1 v1 n2 v2, n1 <> n2 ->
+  binary_op_atom (env + (n1, v1) + (n2, v2) <++> env') op a1 a2 = binary_op_atom (env + (n2, v2) + (n1, v1) <++> env') op a1 a2.
+Proof.
+  unfold binary_op_atom.
+  intros.
+  repeat rewrite_get_val; auto.
+Qed.
+
+Lemma binary_env_dup : forall a1 a2 op env env' n v v',
+  binary_op_atom ((env + (n, v') + (n, v)) <++> env') op a1 a2 = binary_op_atom ((env + (n, v)) <++> env') op a1 a2.
+Proof.
+  intros.
+  unfold binary_op_atom.
+  repeat rewrite_get_val; auto.
+Qed.
+
+Ltac rewrite_binary_op := 
+  match goal with
+  | [ |- context[binary_op_atom ((_ + (?n, _) + (?n, _)) <++> _) _ _ _]] => 
+        rewrite binary_env_dup
+  | [H: ?n1 <> ?n2 |- context[binary_op_atom (_ + (?n1, _) + (?n2, _) <++> _) _ ?a1 ?a2]] => 
+        poseNew (Mark (n1, n2, a1, a2) "rewriting binary_op_atom");
+        rewrite (binary_env_com a1 a2 _ _ _ _ _ _ _ H)
+  | [H: ?n1 = ?n2 -> False |- context[binary_op_atom (_ + (?n1, _) + (?n2, _) <++> _) _ ?a1 ?a2]] => 
+        poseNew (Mark (n1, n2, a1, a2) "rewriting binary_op_atom");
+        rewrite (binary_env_com a1 a2 _ _ _ _ _ _ _ H)
+  end. *)
+
 Definition unary_op_atom env op a := 
   let v := get_value_atom env a in 
     match v with 
@@ -155,18 +335,36 @@ Definition unary_op_atom env op a :=
     | _ => None 
     end.
 
-(* 
-Definition get_cnt0 (env : env cntV) c := 
-  match env ? c with
-  | Some (Cnt (Cnt0 _ body) envV envC) => Some (Cnt (Cnt0 c body) envV envC)
-  | _ => None
+(* Lemma unary_env_com : forall a op env env' n1 v1 n2 v2, n1 <> n2 ->
+  unary_op_atom (env + (n1, v1) + (n2, v2) <++> env') op a = unary_op_atom (env + (n2, v2) + (n1, v1) <++> env') op a.
+Proof.
+  intros.
+  unfold unary_op_atom.
+  rewrite_get_val; auto.
+Qed.
+
+Lemma unary_env_dup : forall a op env env' n v v',
+  unary_op_atom ((env + (n, v') + (n, v)) <++> env') op a = unary_op_atom ((env + (n, v)) <++> env') op a.
+Proof.
+  intros.
+  unfold unary_op_atom.
+  rewrite_get_val; auto.
+Qed.
+
+Ltac rewrite_unary_op := 
+  match goal with
+  | [ |- context[unary_op_atom ((_ + (?n, _) + (?n, _)) <++> _) _ _]] => 
+        rewrite unary_env_dup
+  | [H: ?n1 <> ?n2 |- context[unary_op_atom (_ + (?n1, _) + (?n2, _) <++> _) _ ?a]] => 
+        poseNew (Mark (n1, n2, a) "rewriting unary_op_atom");
+        rewrite (unary_env_com a _ _ _ _ _ _ _ H)
+  | [H: ?n1 = ?n2 -> False |- context[unary_op_atom (_ + (?n1, _) + (?n2, _) <++> _) _ ?a]] => 
+        poseNew (Mark (n1, n2, a) "rewriting unary_op_atom");
+        rewrite (unary_env_com a _ _ _ _ _ _ _ H)
   end.
 
-Definition get_cnt1 (env : env cntV) c := 
-  match env ? c with
-  | Some (Cnt (Cnt1 _ arg body) envV envC) => Some (Cnt (Cnt1 c arg body) envV envC) 
-  | _ => None
-  end. *)
+Ltac rewrite_op := 
+  rewrite_get_val || rewrite_unary_op || rewrite_binary_op. *)
 
 Function evalₜ (fuel : nat) (envV : env value) (envC : env cntV) (t : term) (io : IO) : result * IO := 
   match fuel with
@@ -211,10 +409,10 @@ Function evalₜ (fuel : nat) (envV : env value) (envC : env cntV) (t : term) (i
           end 
       | AppC1 n a => 
           match envC ? n with 
-          | Some (Cnt (Cnt1 _ carg b) envV envC) => 
-              let cnt := Cnt (Cnt1 n carg b) envV envC in
+          | Some (Cnt (Cnt1 _ carg b) cenv cenvC) => 
+              let cnt := Cnt (Cnt1 n carg b) cenv cenvC in
               match get_value_atom envV a with 
-              | Some v => evalₜ fuel (envV + (carg, v)) (envC + (n, cnt)) b io 
+              | Some v => evalₜ fuel (cenv + (carg, v)) (cenvC + (n, cnt)) b io 
               | _ => (Rerr, io)
               end
           | _ => (Rerr, io)
@@ -268,6 +466,143 @@ Function evalₜ (fuel : nat) (envV : env value) (envC : env cntV) (t : term) (i
           end
       end
   end.
+
+(* Ltac eval_env_intanciate_IH IH :=
+  match goal with
+  | [|- context[evalₜ _ _ _ ?t _]] => 
+      let Hdup := fresh "Hdup" in
+      let Hcom := fresh "Hcom" in
+      let Hcnt0dup := fresh "Hcnt0dup" in
+      let Hcnt0com := fresh "Hcnt0com" in
+      let Hcnt1dup := fresh "Hcnt1dup" in
+      let Hcnt1com := fresh "Hcnt1com" in
+      pose proof (IH t) as [Hdup [Hcom [Hcnt0dup [Hcnt0com [Hcnt1dup Hcnt1com]]]]];
+      clear IH
+  end.
+
+Lemma eval_env : forall f t,
+  (forall envV envV' envC io n v' v, 
+    evalₜ f (envV + (n, v') + (n, v) <++> envV') envC t io = evalₜ f (envV + (n, v) <++> envV') envC t io 
+  ) /\ (forall envV envV' envC io n1 n2 v1 v2, n1 <> n2 ->
+    evalₜ f (envV + (n1, v1) + (n2, v2) <++> envV') envC t io = evalₜ f (envV + (n2, v2) + (n1, v1) <++> envV') envC t io
+  ) /\ (forall envV envC envC' io nc bc envVc envVc' envCc n v v',
+    evalₜ f envV (envC + (nc, Cnt (Cnt0 nc bc) (envVc + (n, v') + (n, v) <++> envVc') envCc) <++> envC') t io
+    = evalₜ f envV (envC + (nc, Cnt (Cnt0 nc bc) (envVc + (n, v) <++> envVc') envCc) <++> envC') t io
+  ) /\ (forall envV envC envC' io nc bc envVc envVc' envCc n1 n2 v1 v2, n1 <> n2 ->
+    evalₜ f envV (envC + (nc, Cnt (Cnt0 nc bc) (envVc + (n1, v1) + (n2, v2) <++> envVc') envCc) <++> envC') t io
+    = evalₜ f envV (envC + (nc, Cnt (Cnt0 nc bc) (envVc + (n2, v2) + (n1, v1) <++> envVc') envCc) <++> envC') t io
+  ) /\ (forall envV envC envC' io nc ac bc envVc envVc' envCc n v v',
+    evalₜ f envV (envC + (nc, Cnt (Cnt1 nc ac bc) (envVc + (n, v') + (n, v) <++> envVc') envCc) <++> envC') t io
+    = evalₜ f envV (envC + (nc, Cnt (Cnt1 nc ac bc) (envVc + (n, v) <++> envVc') envCc) <++> envC') t io
+  ) /\ (forall envV envC envC' io nc ac bc envVc envVc' envCc n1 n2 v1 v2, n1 <> n2 ->
+    evalₜ f envV (envC + (nc, Cnt (Cnt1 nc ac bc) (envVc + (n1, v1) + (n2, v2) <++> envVc') envCc) <++> envC') t io
+    = evalₜ f envV (envC + (nc, Cnt (Cnt1 nc ac bc) (envVc + (n2, v2) + (n1, v1) <++> envVc') envCc) <++> envC') t io
+  ).
+Proof.
+  induction f, t; try solve [
+    repeat reduce || rewrite_op || env || destruct_match || eval_env_intanciate_IH IHf
+  ]; simpl.
+  all: try eval_env_intanciate_IH IHf.
+  - repeat reduce || rewrite_op || destruct_match || env.
+    * pose proof (Hcnt0dup (envV + (n, v') + (n, v) <++> envV') envC { } io 
+        name body envV envV' envC n v v'
+      ).
+      repeat env; rewrite_any; auto.
+    * pose proof (Hcnt1dup (envV + (n, v') + (n, v) <++> envV') envC { } io 
+        name arg body envV envV' envC n v v'
+      ).
+      repeat env; rewrite_any; auto.
+    * pose proof (Hcnt0com (envV + (n1, v1) + (n2, v2) <++> envV') envC { } io 
+        name body envV envV' envC n1 n2 v1 v2 H
+      ).
+      repeat env; rewrite_any; auto.
+    * pose proof (Hcnt1com (envV + (n1, v1) + (n2, v2) <++> envV') envC { } io 
+        name arg body envV envV' envC n1 n2 v1 v2 H
+      ).
+      repeat env; rewrite_any; auto.
+    * rewrite Hcnt0dup.
+      
+      
+      destruct (Nat.eq_dec name nc). 
+      pose proof 
+        (Hcnt0dup envV 
+          (envC + (nc, Cnt (Cnt0 nc bc) (envVc + (n, v') + (n, v) <++> envVc') envCc))
+          io name body
+        ).
+  - rewrite binary_env_com; auto.
+    repeat reduce || destruct_match.
+    rewrite 2 add_update.
+    pose proof (IHf t) as [? ?]; auto.
+  - rewrite unary_env_dup.
+    repeat destruct_match || reduce.
+    rewrite 2 add_update.
+    pose proof (IHf t) as [? ?]; auto.
+  - rewrite unary_env_com; auto.
+    repeat destruct_match || reduce.
+    rewrite 2 add_update.
+    pose proof (IHf t) as [? ?]; auto.
+  -
+     admit.
+  - admit.
+  - admit.
+  - admit.
+  - repeat reduce || destruct_match.
+    rewrite 2 add_update.
+    pose proof (IHf t) as [? ?]; auto.
+  - repeat reduce || destruct_match.
+    rewrite 2 add_update.
+    pose proof (IHf t) as [? ?]; auto.
+  - rewrite get_val_env_dup.
+    repeat reduce || destruct_match.
+    rewrite 2 add_update.
+    pose proof (IHf t) as [? ?]; auto.
+  - rewrite get_val_env_com; auto.
+    repeat reduce || destruct_match.
+    rewrite 2 add_update.
+    pose proof (IHf t) as [? ?]; auto.
+  - rewrite get_val_env_dup.
+    repeat reduce || destruct_match.
+  - rewrite get_val_env_com;
+    repeat reduce || destruct_match.
+  - rewrite get_val_env_dup.
+    repeat reduce || destruct_match.
+  - rewrite get_val_env_com;
+    repeat reduce || destruct_match.
+  - rewrite get_val_env_dup.
+    repeat reduce || destruct_match.
+    * pose proof (IHf (AppC0 thenC)) as [? ?]; auto.
+    * pose proof (IHf (AppC0 elseC)) as [? ?]; auto.
+  - rewrite get_val_env_com;
+    repeat reduce || destruct_match.
+    * pose proof (IHf (AppC0 thenC)) as [? ?]; auto.
+    * pose proof (IHf (AppC0 elseC)) as [? ?]; auto.
+  - rewrite get_val_env_dup.
+    repeat reduce || destruct_match.
+  - rewrite get_val_env_com;
+    repeat reduce || destruct_match.
+  - rewrite get_val_env_dup.
+    repeat reduce || destruct_match.
+  - rewrite get_val_env_com;
+    repeat reduce || destruct_match.
+Qed. *)
+
+(* Lemma eval_env_dup : forall f t envV envC io n v' v, 
+  evalₜ f (envV + (n, v') + (n, v)) envC t io = evalₜ f (envV + (n, v)) envC t io.
+Proof.
+  induction f, t; repeat reduce.
+  - rewrite binary_env_dup.
+    repeat destruct_match || reduce.
+
+     rewrite IHf. 
+
+Lemma eval_env_com : forall f t envV envC io n1 n2 v1 v2, n1 <> n2 ->
+  evalₜ f (envV + (n1, v1) + (n2, v2)) envC t io = evalₜ f (envV + (n2, v2) + (n1, v1)) envC t io.
+Proof.
+  induction f, t; repeat reduce.
+  - rewrite binary_env_com; auto.
+    repeat reduce || destruct_match.
+    destruct (Nat.eq_dec name n1), (Nat.eq_dec name n2).
+    *  *)
           
 (* Reserved Notation "'{' io1 '|' '(' Γᵥ ',' Γᵨ ')' '}' t '~>(' f ')' '{' r ',' io2 '}'" (at level 70, no associativity).
 Inductive eval : env value -> env (cnt * (env value)) -> term -> IO -> nat -> result -> IO -> Prop :=

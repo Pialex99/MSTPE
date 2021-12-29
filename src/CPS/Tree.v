@@ -1,4 +1,5 @@
 From Common Require Export Literal Primitive.
+From Utils Require Import Env.
 
 Inductive atom := Var (n: nat) | Lit (lit: literal).
 
@@ -29,23 +30,106 @@ Definition nf_atom a :=
 Fixpoint next_free t := 
   match t with  
   | LetB n _ a1 a2 r => 
-      max (S n) (max (nf_atom a1) (max (nf_atom a2) (next_free r)))
+      Nat.max (S n) (Nat.max (nf_atom a1) (Nat.max (nf_atom a2) (next_free r)))
   | LetU n _ a r => 
-      max (S n) (max (nf_atom a) (next_free r))
+      Nat.max (S n) (Nat.max (nf_atom a) (next_free r))
   | LetC (Cnt0 n b) r => 
-      max (S n) (max (next_free b) (next_free b))
+      Nat.max (S n) (Nat.max (next_free b) (next_free b))
   | LetC (Cnt1 n a b) r => 
-      max (S n) (max (S a) (max (next_free b) (next_free r)))
+      Nat.max (S n) (Nat.max (S a) (Nat.max (next_free b) (next_free r)))
   | LetF (Fnt n c a b) r => 
-      max (S n) (max (S c) (max (S a) (max (next_free b) (next_free r))))
+      Nat.max (S n) (Nat.max (S c) (Nat.max (S a) (Nat.max (next_free b) (next_free r))))
   | LetIn n r => 
-      max (S n) (next_free r)
+      Nat.max (S n) (next_free r)
   | LetOut n a r => 
-      max (S n) (max (nf_atom a) (next_free r))
+      Nat.max (S n) (Nat.max (nf_atom a) (next_free r))
   | AppC0 n => S n 
-  | AppC1 n a => max (S n) (nf_atom a)
-  | AppF f c a => max (nf_atom f) (max (S c) (nf_atom a))
-  | Ite c t e => max (nf_atom c) (max (S t) (S e))
-  | Match s lc rc => max (nf_atom s) (max (S lc) (S rc))
+  | AppC1 n a => Nat.max (S n) (nf_atom a)
+  | AppF f c a => Nat.max (nf_atom f) (Nat.max (S c) (nf_atom a))
+  | Ite c t e => Nat.max (nf_atom c) (Nat.max (S t) (S e))
+  | Match s lc rc => Nat.max (nf_atom s) (Nat.max (S lc) (S rc))
   | Halt a => nf_atom a 
   end.
+
+Section Renameₜ.
+  Variable e : env nat.
+
+  Definition get_or_id (n : nat) := 
+    match e ? n with 
+    | Some n => n
+    | None => n
+    end.
+
+  Definition renameₐ (a : atom) := 
+    match a with 
+    | Var n => Var (get_or_id n)
+    | Lit _ => a
+    end.
+
+  Fixpoint renameₜ (t : term) := 
+    match t with 
+    | LetB n op a1 a2 r => 
+        let n := get_or_id n in
+        let a1 := renameₐ a1 in 
+        let a2 := renameₐ a2 in 
+        let r := renameₜ r in
+          LetB n op a1 a2 r
+    | LetU n op a r =>
+        let n := get_or_id n in
+        let a := renameₐ a in
+        let r := renameₜ r in
+          LetU n op a r
+    | LetC (Cnt0 n b) r => 
+        let n := get_or_id n in
+        let b := renameₜ b in
+        let r := renameₜ r in
+          LetC (Cnt0 n b) r
+    | LetC (Cnt1 n a b) r =>
+        let n := get_or_id n in
+        let a := get_or_id a in
+        let b := renameₜ b in
+        let r := renameₜ r in
+          LetC (Cnt1 n a b) r
+    | LetF (Fnt n c a b) r => 
+        let n := get_or_id n in
+        let c := get_or_id c in
+        let a := get_or_id a in
+        let b := renameₜ b in
+        let r := renameₜ r in
+          LetF (Fnt n c a b) r 
+    | LetIn n r =>
+        let n := get_or_id n in
+        let r := renameₜ r in
+          LetIn n r
+    | LetOut n a r =>
+        let n := get_or_id n in
+        let a := renameₐ a in
+        let r := renameₜ r in
+          LetOut n a r
+    | AppC0 n =>
+        let n := get_or_id n in
+          AppC0 n 
+    | AppC1 n a =>
+        let n := get_or_id n in
+        let a := renameₐ a in
+          AppC1 n a
+    | AppF f c a =>
+        let f := renameₐ f in
+        let c := get_or_id c in
+        let a := renameₐ a in
+          AppF f c a 
+    | Ite c t e =>
+        let c := renameₐ c in
+        let t := get_or_id t in
+        let e := get_or_id e in
+          Ite c t e
+    | Match s lc rc =>
+        let s := renameₐ s in
+        let lc := get_or_id lc in
+        let rc := get_or_id rc in
+          Match s lc rc
+    | Halt a =>
+        let a := renameₐ a in
+          Halt a
+    end.
+End Renameₜ.
