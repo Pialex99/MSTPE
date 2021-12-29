@@ -49,7 +49,87 @@ Section Renameᵥ.
     end.
 End Renameᵥ.
 
-Definition renameₑ (e env : env nat) := rename_e (renameᵥ e) e.
+Definition renameₑ (e : env nat) := rename_e (renameᵥ e) e.
+
+Section Size_env.
+  Variable size_v : value -> nat.
+  
+  Fixpoint size_e (e : env value) := 
+    match e with
+    | nil => 1
+    | (n, v) :: e =>
+        size_v v + size_e e 
+    end.
+End Size_env.
+
+Fixpoint sizeᵥ v := 
+  match v with
+  | Lit _ => 1 
+  | Tuple v1 v2 => 1 + sizeᵥ v1 + sizeᵥ v2 
+  | Left v => 1 + sizeᵥ v 
+  | Right v => 1 + sizeᵥ v 
+  | Fun (Fnt _ _ _ b) Γ =>
+      size b + size_e sizeᵥ Γ
+  end.
+
+Definition sizeₑ e := size_e sizeᵥ e.
+
+Lemma size_v_gt_1 : forall v, 0 < sizeᵥ v.
+Proof.
+  induction v; reduce; try lia.
+  destruct_match.
+  pose proof (size_t_gt_1 body).
+  lia.
+Qed.
+
+Lemma size_e_gt_1 : forall e, 0 < sizeₑ e.
+Proof.
+  induction e; reduce.
+  destruct_match.
+  pose proof (size_v_gt_1 v).
+  lia.
+Qed.
+
+Lemma rename_e_v_empty_ind : forall n e v, 
+  (sizeₑ e < n -> renameₑ { } e = e) /\
+  (sizeᵥ v < n -> renameᵥ { } v = v).
+Proof. 
+  induction n; try lia; reduce.
+  - destruct e; reduce.
+    destruct_match; reduce.
+    rewrite get_or_id_empty.
+    pose proof (IHn e v0) as [IHe IHv].
+    pose proof (size_v_gt_1 v0).
+    pose proof (size_e_gt_1 e).
+    unfold sizeₑ in H1.
+    rewrite IHe, IHv; auto with lia.
+    unfold sizeₑ; lia.
+  - destruct v; reduce.
+    2, 3: pose proof (IHn e v) as [_ ?];rewrite H0; auto with lia.
+    * pose proof (IHn e v1) as [_ ?].
+      pose proof (IHn e v2) as [_ ?].
+      rewrite H0, H1; auto with lia.
+    * destruct_match.
+      rewrite 3 get_or_id_empty, rename_t_empty.
+      pose proof (size_t_gt_1 body).
+      pose proof (IHn e0 (Fun f e0)) as [? _].
+      unfold sizeₑ, renameₑ in *.
+      rewrite H1; auto with lia.
+Qed.
+
+Lemma rename_e_empty : forall e, renameₑ { } e = e.
+Proof.
+  intros.
+  pose proof (rename_e_v_empty_ind (S (sizeₑ e)) e (Lit UnitLit)) as [? _].
+  auto.
+Qed.
+
+Lemma rename_v_empty : forall v, renameᵥ { } v = v.
+Proof.
+  intros.
+  pose proof (rename_e_v_empty_ind (S (sizeᵥ v)) { }) as [_ ?].
+  auto.
+Qed.
 
 Fixpoint value_eqb (v1 v2 : value) :=
   match v1, v2 with 

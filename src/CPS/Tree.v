@@ -1,5 +1,5 @@
 From Common Require Export Literal Primitive.
-From Utils Require Import Env.
+From Utils Require Import Env Tactics.
 
 Inductive atom := Var (n: nat) | Lit (lit: literal).
 
@@ -50,6 +50,28 @@ Fixpoint next_free t :=
   | Match s lc rc => Nat.max (nf_atom s) (Nat.max (S lc) (S rc))
   | Halt a => nf_atom a 
   end.
+
+Fixpoint size t :=
+  match t with
+  | LetB _ _ _ _ r => 1 + size r 
+  | LetU _ _ _ r => 1 + size r 
+  | LetC (Cnt0 _ b) r => 1 + size b + size r 
+  | LetC (Cnt1 _ _ b) r => 1 + size b + size r
+  | LetF (Fnt _ _ _ b) r => 1 + size b + size r
+  | LetIn _ r => 1 + size r
+  | LetOut _ _ r => 1 + size r
+  | AppC0 _ => 1 
+  | AppC1 _ _ => 1
+  | AppF _ _ _ => 1 
+  | Ite _ _ _ => 1
+  | Match _ _ _ => 1
+  | Halt _ => 1
+  end.
+
+Lemma size_t_gt_1 : forall t, 0 < size t.
+Proof.
+  induction t; reduce; destruct_match; lia.
+Qed.
 
 Section Renameₜ.
   Variable e : env nat.
@@ -133,3 +155,27 @@ Section Renameₜ.
           Halt a
     end.
 End Renameₜ.
+
+Lemma get_or_id_empty : forall n, 
+  get_or_id { } n = n.
+Proof. reduce. Qed.
+
+Lemma rename_a_empty : forall a,
+  renameₐ { } a = a.
+Proof.
+  destruct a; reduce.
+Qed.
+
+Lemma rename_t_empty_ind : forall n t, size t < n ->
+  renameₜ { } t = t.
+Proof.
+  induction n, t; repeat reduce || destruct_match || simpl_lia.
+  all: repeat rewrite get_or_id_empty || rewrite rename_a_empty; reduce.
+  all: repeat rewrite IHn; auto with lia.
+Qed.
+
+Lemma rename_t_empty : forall t, 
+  renameₜ { } t = t.
+Proof.
+  eauto using rename_t_empty_ind.
+Qed.
