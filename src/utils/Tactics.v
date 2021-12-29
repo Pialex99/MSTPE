@@ -153,7 +153,7 @@ Ltac invert_constr :=
 
 Ltac reduce := repeat (
   intros || split || (cbn in *) || subst || subst_all
-  || intuition auto || congruence 
+  || intuition auto || congruence
   || clear_dup || invert_constr
   || destruct_exist_H || destruct_and_H).
 

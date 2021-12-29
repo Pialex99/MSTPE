@@ -45,6 +45,28 @@ Fixpoint update {A: Type} (e1 e2 : env A) : env A :=
 Notation "env1 '<++>' env2" := (update env1 env2)
   (at level 50, left associativity) : env_scope.
 
+Fixpoint max {A: Type} (e : env A) : option nat :=
+  match e with 
+  | nil => None
+  | (n, _) :: env =>
+      match env with 
+      | nil => Some n
+      | (n', _) :: _ => 
+          option_map (Nat.max n) (max env)
+      end
+  end.
+
+Fixpoint min {A: Type} (e : env A) : option nat :=
+  match e with 
+  | nil => None
+  | (n, _) :: env =>
+      match env with 
+      | nil => Some n
+      | (n', _) :: _ => 
+          option_map (Nat.min n) (min env)
+      end
+  end.
+
 Fixpoint well_ordered {A: Type} (e : env A) {struct e} : Prop :=
   match e with
   | nil => True 
@@ -81,6 +103,7 @@ Proof.
   Opaque Nat.ltb.
   induction e; repeat reduce || destruct_match.
   all: repeat rewrite Nat.eqb_eq in * 
+           || rewrite Nat.eqb_neq in * 
            || rewrite Nat.ltb_lt in * 
            || rewrite Nat.ltb_ge in *; 
         subst; auto with exfalso lia.
@@ -202,6 +225,157 @@ Proof.
   lia.
 Qed.
 
+Lemma min_max : forall A (e : env A) m M,
+  min e = Some m -> 
+  max e = Some M ->
+    m <= M.
+Proof. 
+  induction e; reduce.
+  repeat destruct_match; reduce.
+  unfold option_map in *.
+  destruct l eqn:E.
+  - repeat invert_constr.
+    lia.
+  - repeat destruct_match; reduce.
+    lia.
+Qed.
+
+Lemma well_ordered_append : forall A (e : env A) M n a, 
+  well_ordered e -> 
+  max e = Some M -> 
+  M < n -> 
+    e + (n, a) = e ++ (n, a) :: nil.
+Proof.
+  induction e; reduce.
+  destruct a, e; reduce.
+  - assert (n <> M) by lia. 
+    apply Nat.eqb_neq in H0.
+    rewrite H0.
+    assert (~ n < M) by lia.
+    apply Nat.ltb_nlt in H2.
+    rewrite H2.
+    reflexivity.
+  - destruct p, (n0 <? n1) eqn:E; reduce.
+    destruct (
+      match e with
+      | nil => Some n1
+      | p :: _ => 
+          let (_, _) := p in
+          option_map (Nat.max n1) (max e)
+      end
+    ); reduce.
+    assert (n <> n0) by lia.
+    apply Nat.eqb_neq in H0.
+    rewrite H0.
+    assert (~ n < n0) by lia.
+    apply Nat.ltb_nlt in H2.
+    rewrite H2.
+    rewrite (IHe _ _ _ H eq_refl); auto with lia.
+Qed.
+
+Lemma well_ordered_prepend : forall A (e : env A) m n a, 
+  well_ordered e -> 
+  min e = Some m ->
+  n < m -> 
+    e + (n, a) = (n, a) :: e.
+Proof. 
+  destruct e; reduce.
+  destruct p, e; reduce.
+  - assert (n <> m) by lia.
+    apply Nat.eqb_neq in H0.
+    rewrite H0.
+    apply Nat.ltb_lt in H1.
+    rewrite H1.
+    auto.
+  - destruct p. 
+    destruct (n0 <? n1); reduce.
+    destruct (
+      match e with
+      | nil => Some n1
+      | p :: _ =>
+          let (_, _) := p in
+          option_map (Nat.min n1) (min e)
+      end); reduce.
+    assert (n <> n0) by lia.
+    apply Nat.eqb_neq in H0.
+    rewrite H0.
+    assert (n < n0) by lia.
+    apply Nat.ltb_lt in H2.
+    rewrite H2.
+    auto.
+Qed.
+
+Lemma well_ordered_concat : forall A (e1 e2 : env A) M m n a, 
+  well_ordered e1 -> 
+  well_ordered e2 -> 
+  max e1 = Some M -> 
+  min e2 = Some m -> 
+  M < n -> n < m ->
+    (e1 ++ e2) + (n, a) = e1 ++ (n, a) :: e2.
+Proof.
+  induction e1; reduce.
+  destruct a, e1; reduce.
+  - assert (n <> M) by lia.
+    apply Nat.eqb_neq in H1.
+    rewrite H1.
+    assert (~ n < M) by lia.
+    apply Nat.ltb_nlt in H5.
+    rewrite H5.
+    erewrite well_ordered_prepend; eauto with lia.
+  - destruct p.
+    destruct (n0 <? n1) eqn:E; reduce.
+    destruct (
+      match e1 with
+      | nil => Some n1
+      | p :: _ => 
+          let (_, _) := p in
+          option_map (Nat.max n1) (max e1)
+      end
+    ); reduce.
+    assert (n <> n0) by lia.
+    apply Nat.eqb_neq in H1.
+    rewrite H1.
+    assert (~ n < n0) by lia.
+    apply Nat.ltb_nlt in H5.
+    rewrite H5.
+    rewrite (IHe1 _ _ _ _ _ H H0 eq_refl H2); auto with lia.
+Qed.
+
+Lemma well_ordered_min : forall A (e : env A) n a,
+  well_ordered ((n, a) :: e) -> 
+    min ((n, a) :: e) = Some n.
+Proof.
+  induction e; reduce.
+  destruct a, (n <? n0) eqn:E; reduce.
+  rewrite (IHe _ a H); reduce; f_equal.
+  apply Nat.ltb_lt in E; lia.
+Qed.
+
+Lemma well_ordered_min_max: forall A (e1 e2 : env A) m M,
+  well_ordered e1 -> 
+  well_ordered e2 -> 
+  max e1 = Some M ->
+  min e2 = Some m -> 
+  M < m ->
+    e1 <++> e2 = e1 ++ e2.
+Proof.
+  induction e2; reduce.
+  repeat destruct_match; reduce.
+  eauto using well_ordered_append.
+  destruct (
+    match l with
+    | nil => Some n0
+    | p :: _ =>
+        let (_, _) := p in
+        option_map (Nat.min n0) (min l)
+    end); reduce.
+  rewrite (IHe2 _ _ H H0 H1 eq_refl); auto with lia.
+  apply Nat.ltb_lt in E2.
+  apply (well_ordered_concat _ _ _ M n0 _ _ H); try solve [reduce].
+  eapply well_ordered_min; reduce.
+  lia.
+Qed.
+
 Ltac env := 
   match goal with
   | H: (_ <++> _) ? _ = None |- _ => 
@@ -255,12 +429,23 @@ Ltac env :=
     destruct (e1 ? n) eqn:E;
     [rewrite (lookup_concat_first _ _ _ _ _ E) 
     | rewrite (lookup_concat_second _ _ _ _ E)]
+  | [H: context[(?e2 <++> ?e1) ? ?n] |- _ ] => 
+    let E := fresh "E" in 
+    destruct (e1 ? n) eqn:E;
+    [rewrite (lookup_concat_first _ _ _ _ _ E) in H
+    | rewrite (lookup_concat_second _ _ _ _ E) in H]
   | [|- context[(_ + (?n1, _) + (?n2, _))]] => 
     destruct (Nat.eq_dec n1 n2); 
-    [subst; rewrite add_dup | rewrite add_com]
+    [subst; rewrite add_dup | rewrite add_com; auto]
   | [|- context[(_ + (?n1, _)) ? ?n2]] =>
     destruct (Nat.eq_dec n1 n2); 
-    [subst; rewrite lookup_add_eq | rewrite lookup_add_ne]
+    [subst; rewrite lookup_add_eq | rewrite lookup_add_ne; auto]
+  | [H: context[(_ + (?n1, _) + (?n2, _))] |- _ ] => 
+    destruct (Nat.eq_dec n1 n2); 
+    [subst; rewrite add_dup in H | rewrite add_com in H; auto]
+  | [H: context[(_ + (?n1, _)) ? ?n2] |- _ ] =>
+    destruct (Nat.eq_dec n1 n2); 
+    [subst; rewrite lookup_add_eq in H | rewrite lookup_add_ne in H; auto]
   end.
 
 Global Opaque empty lookup add update.
