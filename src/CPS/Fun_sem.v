@@ -446,20 +446,20 @@ Ltac rewrite_unary_op :=
 Ltac rewrite_op := 
   rewrite_get_val || rewrite_unary_op || rewrite_binary_op. *)
 
-Function evalₜ (fuel : nat) (envV : env value) (envC : env cntV) (t : term) (io : IO) : result * IO := 
+Fixpoint evalₜ (fuel : nat) (envV : env value) (envC : env cntV) (t : term) (io : IO) : result * IO * nat := 
   match fuel with
-  | 0 => (Rtimeout, io)
+  | 0 => (Rtimeout, io, 0)
   | S fuel => 
       match t with
       | LetB n op a1 a2 r => 
           match binary_op_atom envV op a1 a2 with 
           | Some v => evalₜ fuel (envV + (n, v)) envC r io 
-          | _ => (Rerr, io)
+          | _ => (Rerr, io, fuel)
           end 
       | LetU n op a r => 
           match unary_op_atom envV op a with 
           | Some v => evalₜ fuel (envV + (n, v)) envC r io
-          | _ => (Rerr, io)
+          | _ => (Rerr, io, fuel)
           end 
       | LetC (Cnt0 n b) r => 
           let c := Cnt0 n b in 
@@ -473,19 +473,19 @@ Function evalₜ (fuel : nat) (envV : env value) (envC : env cntV) (t : term) (i
       | LetIn n r => 
           match get_input io with
           | Some (i, io) => evalₜ fuel (envV + (n, Lit (IntLit i))) envC r io
-          | _ => (Reoi, io)
+          | _ => (Reoi, io, fuel)
           end 
       | LetOut n a r => 
           match get_value_atom envV a with 
           | Some (Lit (IntLit o)) => evalₜ fuel (envV + (n, Lit UnitLit)) envC r (outputs io o)
-          | _ => (Rerr, io)
+          | _ => (Rerr, io, fuel)
           end
       | AppC0 n => 
           match envC ? n with 
           | Some (Cnt (Cnt0 _ b) envV envC) => 
               let cnt := Cnt (Cnt0 n b) envV envC in 
               evalₜ fuel envV (envC + (n, cnt)) b io 
-          | _ => (Rerr, io)
+          | _ => (Rerr, io, fuel)
           end 
       | AppC1 n a => 
           match envC ? n with 
@@ -493,12 +493,12 @@ Function evalₜ (fuel : nat) (envV : env value) (envC : env cntV) (t : term) (i
               let cnt := Cnt (Cnt1 n carg b) cenv cenvC in
               match get_value_atom envV a with 
               | Some v => evalₜ fuel (cenv + (carg, v)) (cenvC + (n, cnt)) b io 
-              | _ => (Rerr, io)
+              | _ => (Rerr, io, fuel)
               end
-          | _ => (Rerr, io)
+          | _ => (Rerr, io, fuel)
           end
       | AppF f c a => 
-          match get_value_atom envV a with
+          match get_value_atom envV f with
           | Some (Fun (Fnt fname retC farg fbody) fenv) => 
               let f := Fnt fname retC farg fbody in
               match envC ? c with
@@ -507,11 +507,11 @@ Function evalₜ (fuel : nat) (envV : env value) (envC : env cntV) (t : term) (i
                   match get_value_atom envV a with
                   | Some v => 
                       evalₜ fuel (fenv + (fname, Fun f fenv) + (farg, v)) (empty + (c, cnt)) fbody io
-                  | _ => (Rerr, io)
+                  | _ => (Rerr, io, fuel)
                   end 
-              | _ => (Rerr, io)
+              | _ => (Rerr, io, fuel)
               end 
-          | _ => (Rerr, io)
+          | _ => (Rerr, io, fuel)
           end
       | Ite c t e => 
           match get_value_atom envV c with
@@ -519,7 +519,7 @@ Function evalₜ (fuel : nat) (envV : env value) (envC : env cntV) (t : term) (i
               evalₜ fuel envV envC (AppC0 t) io 
           | Some (Lit (BoolLit false)) => 
               evalₜ fuel envV envC (AppC0 e) io 
-          | _ => (Rerr, io)
+          | _ => (Rerr, io, fuel)
           end 
       | Match s lc rc => 
           match get_value_atom envV s with 
@@ -528,24 +528,64 @@ Function evalₜ (fuel : nat) (envV : env value) (envC : env cntV) (t : term) (i
               | Some (Cnt (Cnt1 _ carg b) envV envC) => 
                   let cnt := Cnt (Cnt1 lc carg b) envV envC in 
                   evalₜ fuel (envV + (carg, v)) (envC + (lc, cnt)) b io 
-              | _ => (Rerr, io)
+              | _ => (Rerr, io, fuel)
               end
           | Some (Right v) => 
               match envC ? rc with 
               | Some (Cnt (Cnt1 _ carg b) envV envC) => 
                   let cnt := Cnt (Cnt1 rc carg b) envV envC in 
                   evalₜ fuel (envV + (carg, v)) (envC + (rc, cnt)) b io 
-              | _ => (Rerr, io)
+              | _ => (Rerr, io, fuel)
               end 
-          | _ => (Rerr, io)
+          | _ => (Rerr, io, fuel)
           end 
       | Halt a => 
           match get_value_atom envV a with 
-          | Some v => (Rhalt v, io)
-          | _ => (Rerr, io)
+          | Some v => (Rhalt v, io, fuel)
+          | _ => (Rerr, io, fuel)
           end
       end
   end.
+
+Lemma eval_fuel : forall f ev ec t io r io' f', 
+  evalₜ f ev ec t io = (r, io', f') -> f' <= f.
+Proof.
+  induction f; reduce.
+  destruct t; 
+  repeat reduce || destruct_match || apply IHf in H.
+Qed.
+
+Fact S_sub : forall n, S n - n = 1.
+  lia. Qed.
+
+Fact sub_0 : forall n, n - 0 = n.
+  lia. Qed.
+
+Fact S_sub' : forall n m, m <= n -> S n - m = S (n - m).
+  lia. Qed.
+
+Opaque Nat.sub.
+
+Ltac inst_IH :=
+  match goal with
+  | IH : forall _ _ _ _ _ _ _, evalₜ _ _ _ _ _ = (_, _, _) -> 
+          forall _,  _ <= _ -> evalₜ _ _ _ _ _ = (_, _, _), 
+    H : evalₜ _ _ _ _ _ = (_, _, _), 
+    A : ?f3 <= _ |- _ =>
+      unshelve epose proof (IH _ _ _ _ _ _ _ H f3 _); 
+      apply eval_fuel in H; try lia
+  end.
+
+Theorem eval_min_fuel : forall f1 ev ec t io r io' f2, 
+  evalₜ f1 ev ec t io = (r, io', f2) -> forall f3, f3 <= f2 -> 
+    evalₜ (f1 - f3) ev ec t io = (r, io', f2 - f3).
+Proof.
+  induction f1; reduce.
+  destruct t; 
+  repeat reduce || destruct_match || inst_IH;
+  rewrite S_sub'; reduce; 
+  repeat rewrite_any; auto with lia.
+Qed.
 
 (* Ltac eval_env_intanciate_IH IH :=
   match goal with
