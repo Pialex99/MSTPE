@@ -22,7 +22,6 @@ Section NF_v.
     | (n, v) :: env => 
         Nat.max (S n) (Nat.max (nf_v v) (nf_env env))
     end.
-  
 End NF_v.
 
 Fixpoint next_freeᵥ (v : value) : nat := 
@@ -142,80 +141,222 @@ Definition compute_unary_op op v :=
 
 Close Scope Z_scope.
 
-Function evalₛ (fuel : nat) (env : env value) (t : term) (io : IO) {struct fuel} : result * IO :=
-  match fuel with 
-  | 0 => (Rtimeout, io)
-  | S fuel => 
+Definition clock_term_r (a1 a2 : nat * term) := 
+  match a1, a2 with 
+  | (c1, t1), (c2, t2) => c1 < c2 \/ size t1 < size t2 
+  end.
+
+(* Fixpoint evalₛ' (clock : nat) (e : env value) (t : term) (io : IO) {struct clock} : result * IO :=
+  let fix eval_aux (env : env value) (t : term) (io : IO) {struct t} : result * IO :=
     match t with
     | Var n => 
-      match lookup env n with 
-      | None => (Rerr, io)
-      | Some v => (Rval v, io)
-      end 
+        match env ? n with
+        | Some v => (Rval v, io)
+        | None => (Rerr, io)
+        end
     | Const l => (Rval (Lit l), io)
-    | Let x t rest => 
-      match evalₛ fuel env t io with 
-      | (Rval v, io) => evalₛ fuel (env + (x, v)) rest io 
-      | (r, io) => (r, io)
-      end
-    | LetRec (Fnt fname farg fbody) rest => 
-        let f := Fnt fname farg fbody in
-        evalₛ fuel (env + (fname, Fun f env)) rest io
-    | App f t => 
-        match evalₛ fuel env f io with 
-        | (Rval (Fun (Fnt fname farg fbody) fenv), io) => 
-            match evalₛ fuel env t io with 
+    | Let n t r => 
+        match eval_aux env t io with
+        | (Rval v, io) => eval_aux (env + (n, v)) t io 
+        | (r, io) => (r, io)
+        end
+    | LetRec (Fnt n a b) r => 
+        eval_aux (env + (n, Fun (Fnt n a b) env)) r io 
+    | App f t =>
+        match eval_aux env f io with 
+        | (Rval (Fun (Fnt n a b) Γ), io) => 
+            match eval_aux env t io with
             | (Rval v, io) => 
-                let f := Fnt fname farg fbody in
-                evalₛ fuel (env + (fname, Fun f fenv) + (farg, v)) fbody io
+                match clock with 
+                | 0 => (Rtimeout, io)
+                | S clock => 
+                    evalₛ' clock (Γ + (n, Fun (Fnt n a b) Γ) + (a, v)) b io
+                end 
             | (r, io) => (r, io)
             end
         | (Rval _, io) => (Rerr, io)
         | (r, io) => (r, io)
         end
     | In => 
-        match get_input io with 
-        | None => (Reoi, io)
+        match get_input io with
         | Some (i, io) => (Rval (Lit (IntLit i)), io)
+        | None => (Reoi, io)
         end
-    | Out t => 
-        match evalₛ fuel env t io with
+    | Out t =>
+        match eval_aux env t io with
         | (Rval (Lit (IntLit o)), io) => (Rval (Lit UnitLit), outputs io o)
+        | (Rval _ , io) => (Rerr, io)
+        | (r, io) => (r, io)
+        end
+    | Ite c t e =>
+        match eval_aux env c io with
+        | (Rval (Lit (BoolLit true)), io) => 
+            eval_aux env t io 
+        | (Rval (Lit (BoolLit false)), io) =>
+            eval_aux env e io 
         | (Rval _, io) => (Rerr, io)
         | (r, io) => (r, io)
         end
-    | Ite c t e => 
-        match evalₛ fuel env c io with
-        | (Rval (Lit (BoolLit true)), io) => 
-            evalₛ fuel env t io 
-        | (Rval (Lit (BoolLit false)), io) => 
-            evalₛ fuel env e io 
-        | (Rval _, io) => (Rerr, io)
-        | (r, io) => (r, io)
-        end 
     | BinaryOp op t1 t2 => 
-        match evalₛ fuel env t1 io with
+        match eval_aux env t1 io with
         | (Rval v1, io) => 
-            match evalₛ fuel env t2 io with 
+            match eval_aux env t2 io with
             | (Rval v2, io) => (compute_binary_op op v1 v2, io)
             | (r, io) => (r, io)
-            end 
+            end
         | (r, io) => (r, io)
         end
     | UnaryOp op t => 
-        match evalₛ fuel env t io with 
+        match eval_aux env t io with
         | (Rval v, io) => (compute_unary_op op v, io)
         | (r, io) => (r, io)
         end
     | Match s (ln, lt) (rn, rt) => 
-        match evalₛ fuel env s io with
-        | (Rval (Left v), io) => evalₛ fuel (env + (ln, v)) lt io 
-        | (Rval (Right v), io) => evalₛ fuel (env + (rn, v)) rt io
+        match eval_aux env s io with
+        | (Rval (Left v), io) => 
+            eval_aux (env + (ln, v)) lt io 
+        | (Rval (Right v), io) =>
+            eval_aux (env + (rn, v)) rt io
         | (Rval _, io) => (Rerr, io)
         | (r, io) => (r, io)
-        end 
+        end
+    end
+  in eval_aux e t io. *)
+
+Fixpoint evalₛ (fuel : nat) (env : env value) (t : term) (io : IO) {struct fuel} : result * IO * nat :=
+  match fuel with 
+  | 0 => (Rtimeout, io, 0)
+  | S fuel => 
+    match t with
+    | Var n => 
+      match lookup env n with 
+      | None => (Rerr, io, fuel)
+      | Some v => (Rval v, io, fuel)
+      end 
+    | Const l => (Rval (Lit l), io, fuel)
+    | Let x t rest => 
+        let '(r, io, f1) := evalₛ fuel env t io in 
+        match r with 
+        | Rval v => 
+            let '(r, io, f2) := evalₛ fuel (env + (x, v)) rest io in
+              (r, io, Nat.min f1 f2)
+        | _ => (r, io, f1)
+        end
+    | LetRec (Fnt fname farg fbody) rest => 
+        let f := Fnt fname farg fbody in
+        evalₛ fuel (env + (fname, Fun f env)) rest io
+    | App f t => 
+        let '(r, io, f1) := evalₛ fuel env f io in 
+        match r with 
+        | Rval (Fun (Fnt fname farg fbody) fenv) => 
+            let '(r, io, f2) := evalₛ fuel env t io in 
+            match r with
+            | Rval v => 
+                let f := Fnt fname farg fbody in
+                let '(r, io, f3) := evalₛ fuel (env + (fname, Fun f fenv) + (farg, v)) fbody io in 
+                  (r, io, Nat.min f1 (Nat.min f2 f3))
+            | _ => (r, io, Nat.min f1 f2)
+            end
+        | Rval _ => (Rerr, io, f1)
+        | _ => (r, io, f1)
+        end
+    | In => 
+        match get_input io with 
+        | None => (Reoi, io, fuel)
+        | Some (i, io) => (Rval (Lit (IntLit i)), io, fuel)
+        end
+    | Out t => 
+        let '(r, io, f') := evalₛ fuel env t io in 
+        match r with 
+        | Rval (Lit (IntLit o)) => (Rval (Lit UnitLit), outputs io o, f')
+        | Rval _ => (Rerr, io, f')
+        | _ => (r, io, f')
+        end
+    | Ite c t e => 
+        let '(r, io, f1) := evalₛ fuel env c io in 
+        match r with
+        | Rval (Lit (BoolLit true)) => 
+            let '(r, io, f2) := evalₛ fuel env t io in 
+              (r, io, Nat.min f1 f2)
+        | Rval (Lit (BoolLit false)) => 
+            let '(r, io, f2) := evalₛ fuel env e io in
+              (r, io, Nat.min f1 f2)
+        | Rval _ => (Rerr, io, f1)
+        | _ => (r, io, f1)
+        end
+    | BinaryOp op t1 t2 => 
+        let '(r, io, f1) := evalₛ fuel env t1 io in 
+        match r with
+        | Rval v1 => 
+            let '(r, io, f2) := evalₛ fuel env t2 io in 
+            match r with
+            | Rval v2 => (compute_binary_op op v1 v2, io, Nat.min f1 f2)
+            | _ => (r, io, Nat.min f1 f2)
+            end 
+        | _ => (r, io, f1)
+        end
+    | UnaryOp op t => 
+        let '(r, io, f') := evalₛ fuel env t io in 
+        match r with
+        | Rval v => (compute_unary_op op v, io, f')
+        | _ => (r, io, f')
+        end
+    | Match s (ln, lt) (rn, rt) => 
+        let '(r, io, f1) := evalₛ fuel env s io in
+        match r with
+        | Rval (Left v) => 
+            let '(r, io, f2) := evalₛ fuel (env + (ln, v)) lt io in 
+              (r, io, Nat.min f1 f2)
+        | Rval (Right v) => 
+            let '(r, io, f2) := evalₛ fuel (env + (rn, v)) rt io in 
+              (r, io, Nat.min f1 f2)
+        | Rval _ => (Rerr, io, f1)
+        | _ => (r, io, f1)
+        end
     end
   end.
+
+Fact S_sub : forall n, S n - n = 1.
+  lia. Qed.
+
+Fact sub_0 : forall n, n - 0 = n.
+  lia. Qed.
+
+Fact S_sub' : forall n m, m <= n -> S n - m = S (n - m).
+  lia. Qed.
+
+Opaque Nat.sub.
+
+Lemma eval_fuel : forall f e t io r io' f', 
+  evalₛ f e t io = (r, io', f') -> f' <= f.
+Proof.
+  induction f; reduce.
+  destruct t; 
+  repeat reduce || destruct_match 
+    || apply_anywhere IHf; lia.
+Qed.
+
+Ltac inst_IH := 
+  match goal with
+  | IH : forall _ _ _ _ _ _, evalₛ _ _ _ _ = (_, _, _) -> 
+          forall _, _ <= _ -> evalₛ _ _ _ _ = (_, _, _), 
+    H : evalₛ _ _ _ _ = (_, _, _), 
+    A : ?f3 <= _ |- _ => 
+      unshelve epose proof (IH _ _ _ _ _ _ H f3 _); try lia;
+      apply eval_fuel in H
+  end.
+
+Theorem eval_min_fuel : forall f1 e t io r io' f2, 
+    evalₛ f1 e t io = (r, io', f2) -> forall f3, f3 <= f2 -> 
+      evalₛ (f1 - f3) e t io = (r, io', f2 - f3).
+Proof.
+  induction f1; reduce.
+  destruct t; reduce; try solve [
+    repeat reduce || destruct_match || inst_IH;
+    rewrite S_sub'; reduce; 
+    repeat rewrite_any; auto with lia
+  ].
+Qed.
 
 (* Reserved Notation "'{' io1 '|' Γ '}' t '~>(' f ')' '{' r ',' io2 '}'" (at level 70, no associativity).
 Inductive eval : env value -> term -> IO -> nat -> result -> IO -> Prop :=
