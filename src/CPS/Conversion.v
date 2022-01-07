@@ -194,7 +194,21 @@ Fixpoint cpsᵥ (nf : nat) (v : SV.value) {struct v} : nat * CV.value :=
       (nf, CV.Fun (CT.Fnt fname c farg fbody) env)
   end.
 
-Definition equivᵥ nf v1 v2 := exists e, (e = { } \/ nf <= min e) /\ v1 = renameᵥ e v2.
+(* Definition equivᵥ v1 v2 := exists e, v1 = renameᵥ e v2.
+
+Lemma cps_V_equiv' : forall v nf1 nf2, 
+  let (nf1', v1) := cpsᵥ nf1 v in 
+  let (nf2', v2) := cpsᵥ nf2 v in 
+    exists e, (e = { } \/ (min e <= nf2 /\ nf2' < max e)) /\ v1 = renameᵥ e v2.
+Proof.
+  induction v; repeat reduce || destruct_match.
+  - eexists; reduce.
+  - pose proof (IHv1 nf1 nf2).
+    pose proof (IHv2 n2 n1).
+    repeat reduce || destruct_match || destruct_and_H || destruct_or_H.
+    * eexists; reduce.
+    * exists x.
+      reduce. *)
 
 Lemma cps_v_equiv : forall v nf1 nf2,
   let (_, v1) := cpsᵥ nf1 v in 
@@ -251,8 +265,8 @@ Proof.
     + exists v.
 
 
-Theorem cps_rec_correct : forall f t v io env io',
-    evalₛ f env t io = (Rval v, io') -> forall nf c a b cenvV cenvC, 
+Theorem cps_rec_correct : forall f f' t v io env io',
+    evalₛ f env t io = (Rval v, io', f') -> forall nf c a b cenvV cenvC, 
     ST.next_free_env env <= nf -> ST.next_free t <= nf ->
     c < nf -> a < nf ->  CT.next_free b <= nf -> 
     CV.next_free_envV cenvV <= nf -> CV.next_free_envC cenvC <= nf -> 

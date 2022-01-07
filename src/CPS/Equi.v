@@ -884,5 +884,3 @@ Qed.
 
 #[global]
 Hint Resolve equiv_v_trans equiv_r_trans : equiv_cps. *)
-
-(* Lemma equiv_monotone : forall k  *)
